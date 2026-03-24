@@ -33,9 +33,10 @@ test_assets/
 # Agent transcripts
 agent-transcripts/
 
+# Input OCIO configs (sample/reference configs, not needed by tools)
+INPUT_OCIO/
+
 # Large binary / data directories (not suitable for git)
-INPUT_OCIO/FACES_OCIO/
-INPUT_OCIO/aces2_ocio21_config/
 ocio_vendor_extensions/families_pre_clf/
 ocio_aces_enricher/colorspace_repository/
 CSV_REVIEW/
