@@ -12,6 +12,16 @@ import re
 
 import PyOpenColorIO as ocio
 
+# BT.2020 to ACES2065-1 (AP0) matrix — from the official ACES v2.0 config.
+# Used inline instead of ColorSpaceTransform(src="Linear Rec.2020") so the
+# Canon CLog color spaces work in reference configs (which lack that CS).
+BT2020_TO_AP0_MATRIX = [
+    0.679085634706913, 0.157700914643159, 0.163213450649929, 0,
+    0.0460020030800595, 0.859054673002905, 0.0949433239170316, 0,
+    -0.000573943187616201, 0.0284677684080262, 0.972106174779585, 0,
+    0, 0, 0, 1,
+]
+
 # ---------------------------------------------------------------------------
 # URNs to add to existing color spaces
 # ---------------------------------------------------------------------------
@@ -88,7 +98,7 @@ def build_canonlog2_bt2020(config, lut_dir=None):
         gt.appendTransform(ocio.FileTransform(src=lut_name, interpolation=ocio.INTERP_LINEAR))
     else:
         gt.appendTransform(ocio.BuiltinTransform("CURVE - CANON_CLOG2_to_LINEAR"))
-    gt.appendTransform(ocio.ColorSpaceTransform(src="Linear Rec.2020", dst="ACES2065-1"))
+    gt.appendTransform(ocio.MatrixTransform(matrix=BT2020_TO_AP0_MATRIX))
     cs.setTransform(gt, ocio.COLORSPACE_DIR_TO_REFERENCE)
     return cs
 
@@ -110,7 +120,7 @@ def build_canonlog3_bt2020(config, lut_dir=None):
         gt.appendTransform(ocio.FileTransform(src=lut_name, interpolation=ocio.INTERP_LINEAR))
     else:
         gt.appendTransform(ocio.BuiltinTransform("CURVE - CANON_CLOG3_to_LINEAR"))
-    gt.appendTransform(ocio.ColorSpaceTransform(src="Linear Rec.2020", dst="ACES2065-1"))
+    gt.appendTransform(ocio.MatrixTransform(matrix=BT2020_TO_AP0_MATRIX))
     cs.setTransform(gt, ocio.COLORSPACE_DIR_TO_REFERENCE)
     return cs
 

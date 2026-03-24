@@ -258,6 +258,3 @@ The v2.3 worktree also needs `semver` and `requests`:
 ```bash
 cd ../OpenColorIO-Config-ACES-v23 && pip install semver requests
 ```
-
-### Reference configs fail validation with "Linear Rec.2020" error
-This is a known issue with the enricher adding Canon Log color spaces that reference `Linear Rec.2020`, which is not present in reference configs (only in studio/cg configs). The Canon color spaces work correctly in studio and cg configs. This does not affect the core ACES transforms.
