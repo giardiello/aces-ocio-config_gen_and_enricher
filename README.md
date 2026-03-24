@@ -26,7 +26,7 @@ Each generated config is then **enriched** with:
 - **Python 3.10+**
 - **OpenColorIO >= 2.4** (Python bindings) — `pip install opencolorio`
 - **NumPy** — `pip install numpy`
-- **Two worktree clones** of the OpenColorIO-Config-ACES repository (see [Setup](#setup))
+- **Two worktree clones** of [OpenColorIO-Config-ACES](https://github.com/AcademySoftwareFoundation/OpenColorIO-Config-ACES) (see [Setup](#setup))
 
 ### Setup
 
@@ -42,10 +42,12 @@ pip install -r requirements.txt
 cd ..
 
 # v4.0.0 worktree (generates OCIO v2.5 configs)
+# Source: https://github.com/AcademySoftwareFoundation/OpenColorIO-Config-ACES/tree/v4.0.0
 git clone https://github.com/AcademySoftwareFoundation/OpenColorIO-Config-ACES.git
 cd OpenColorIO-Config-ACES && git checkout v4.0.0 && pip install -e ".[dev]" && cd ..
 
 # v2.2.0 worktree (generates OCIO v2.3 configs)
+# Source: https://github.com/AcademySoftwareFoundation/OpenColorIO-Config-ACES/tree/v2.2.0
 git clone https://github.com/AcademySoftwareFoundation/OpenColorIO-Config-ACES.git OpenColorIO-Config-ACES-v23
 cd OpenColorIO-Config-ACES-v23 && git checkout v2.2.0 && pip install -e ".[dev]" && cd ..
 ```
@@ -55,8 +57,8 @@ The expected directory layout:
 ```
 Dev_prj/
 ├── OCIO_ACES_CONFIG_GEN/          # This repository
-├── OpenColorIO-Config-ACES/       # v4.0.0 worktree (OCIO 2.5)
-└── OpenColorIO-Config-ACES-v23/   # v2.2.0 worktree (OCIO 2.3)
+├── OpenColorIO-Config-ACES/       # v4.0.0 worktree (OCIO 2.5) — github.com/AcademySoftwareFoundation/OpenColorIO-Config-ACES
+└── OpenColorIO-Config-ACES-v23/   # v2.2.0 worktree (OCIO 2.3) — same repo, different tag
 ```
 
 ### Generate All Configs
