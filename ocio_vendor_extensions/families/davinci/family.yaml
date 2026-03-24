@@ -1,0 +1,38 @@
+schema_version: 1
+family: davinci
+description: DaVinci DWG display-referred views (FACES)
+depends_on: []
+display_mappings:
+  'DaVinci : sRGB Display: Piecewise : Rec.709':
+  - sRGB - Display
+  'DaVinci : DCI: 2.6 Gamma : P3 D65':
+  - Display P3 - Display
+  - P3-D65 - Display
+  'DaVinci : Rec.1886: 2.4 Gamma : Rec.709':
+  - Rec.1886 Rec.709 - Display
+  'DaVinci : Rec.2020: 2.4 Gamma : Rec.2020':
+  - Rec.1886 Rec.2020 - Display
+  'DaVinci : Rec.2100 : HLG 1.2 Gamma : Rec.2020 : 1000 nits':
+  - Rec.2100-HLG - Display
+  'DaVinci : Rec.2100 : ST 2084 PQ : Rec.2020 : 1000 nits':
+  - Rec.2100-PQ - Display
+  'DaVinci : Rec.2100 : ST 2084 PQ : Rec.2020 : 2000 nits':
+  - Rec.2100-PQ - Display
+  'DaVinci : Rec.2100 : ST 2084 PQ : Rec.2020 : 4000 nits':
+  - Rec.2100-PQ - Display
+  'DaVinci : Rec.2100 : ST 2084 PQ : Rec.2020 : 500 nits':
+  - Rec.2100-PQ - Display
+  'DaVinci : Dolby Cin: ST 2084 PQ : Rec.2020 : 108 nits':
+  - Rec.2100-PQ - Display
+  'DaVinci : Dolby: ST 2084 PQ : P3 D65 : 1000 nits':
+  - ST2084-P3-D65 - Display
+  'DaVinci : Dolby: ST 2084 PQ : P3 D65 : 2000 nits':
+  - ST2084-P3-D65 - Display
+  'DaVinci : Dolby: ST 2084 PQ : P3 D65 : 4000 nits':
+  - ST2084-P3-D65 - Display
+  'DaVinci : Dolby: ST 2084 PQ : P3 D65 : 500 nits':
+  - ST2084-P3-D65 - Display
+  'DaVinci : Dolby Cin: ST 2084 PQ : P3 D65 : 108 nits':
+  - ST2084-P3-D65 - Display
+intermediates:
+- 'Linear DaVinci WideGamut'

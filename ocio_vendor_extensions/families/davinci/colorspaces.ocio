@@ -1,0 +1,331 @@
+ocio_profile_version: 2.4
+
+environment:
+  {}
+search_path: luts
+strictparsing: true
+luma: [0.2126, 0.7152, 0.0722]
+
+roles:
+  aces_interchange: ACES2065-1
+  cie_xyz_d65_interchange: CIE XYZ-D65 - Display-referred
+  color_picking: sRGB Encoded Rec.709 (sRGB)
+  color_timing: ACEScct
+  compositing_log: ACEScct
+  data: Raw
+  matte_paint: ACEScct
+  scene_linear: ACEScg
+  texture_paint: sRGB Encoded Rec.709 (sRGB)
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: ACES2065-1}
+
+displays:
+  sRGB - Display:
+    - !<View> {name: Raw, colorspace: Raw}
+
+active_displays: []
+active_views: []
+
+view_transforms:
+  - !<ViewTransform>
+    name: Un-tone-mapped
+    from_scene_reference: !<BuiltinTransform> {style: UTILITY - ACES-AP0_to_CIE-XYZ-D65_BFD}
+
+display_colorspaces:
+  - !<ColorSpace>
+    name: CIE XYZ-D65 - Display-referred
+    aliases: [cie_xyz_d65_display, lin_ciexyzd65_display]
+    family: ""
+    equalitygroup: ""
+    bitdepth: 32f
+    description: The "CIE XYZ (D65)" display connection colorspace.
+    isdata: false
+    encoding: display-linear
+    allocation: uniform
+
+colorspaces:
+  - !<ColorSpace>
+    name: ACES2065-1
+    aliases: [aces2065_1, aces, ACES - ACES2065-1, lin_ap0, lin_ap0_scene]
+    family: ACES
+    equalitygroup: ""
+    bitdepth: 32f
+    description: The "Academy Color Encoding System" reference colorspace.
+    isdata: false
+    categories: [file-io, texture]
+    encoding: scene-linear
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: ACEScct
+    aliases: [ACES - ACEScct, acescct_ap1]
+    family: ACES
+    equalitygroup: ""
+    bitdepth: 32f
+    description: |
+      Convert ACEScct to ACES2065-1
+
+      ACEStransformID: urn:ampas:aces:transformId:v2.0:CSC.Academy.ACEScct_to_ACES.a2.v1
+
+      AMF Components
+      --------------
+      ACEStransformID: urn:ampas:aces:transformId:v2.0:CSC.Academy.ACES_to_ACEScct.a2.v1
+    isdata: false
+    categories: [file-io, working-space]
+    encoding: log
+    allocation: uniform
+    to_scene_reference: !<BuiltinTransform> {style: ACEScct_to_ACES2065-1}
+
+  - !<ColorSpace>
+    name: ACEScg
+    aliases: [ACES - ACEScg, lin_ap1, lin_ap1_scene]
+    family: ACES
+    equalitygroup: ""
+    bitdepth: 32f
+    description: |
+      Convert ACEScg to ACES2065-1
+
+      ACEStransformID: urn:ampas:aces:transformId:v2.0:CSC.Academy.ACEScg_to_ACES.a2.v1
+
+      AMF Components
+      --------------
+      ACEStransformID: urn:ampas:aces:transformId:v2.0:CSC.Academy.ACES_to_ACEScg.a2.v1
+    isdata: false
+    categories: [file-io, working-space, texture]
+    encoding: scene-linear
+    allocation: uniform
+    to_scene_reference: !<BuiltinTransform> {style: ACEScg_to_ACES2065-1}
+
+  - !<ColorSpace>
+    name: "DaVinci : DCI: 2.6 Gamma : P3 D65"
+    family: DaVinci/display_referred/DCI
+    equalitygroup: ""
+    bitdepth: 32f
+    description: "DCI: 2.6 Gamma : P3 D65"
+    isdata: false
+    allocation: uniform
+    allocationvars: [0, 1]
+    from_scene_reference: !<FileTransform> {src: DaVinci_ACES_to_P3D65_2_6y.clf, interpolation: best}
+
+  - !<ColorSpace>
+    name: "DaVinci : Dolby Cin: ST 2084 PQ : P3 D65 : 108 nits"
+    family: DaVinci/display_referred/Dolby Cin
+    equalitygroup: ""
+    bitdepth: 32f
+    description: "Dolby Cin: ST 2084 PQ : P3 D65 : 108 nits"
+    isdata: false
+    allocation: uniform
+    allocationvars: [0, 1]
+    from_scene_reference: !<FileTransform> {src: DaVinci_ACES_to_P3D65_PQ108nits.clf, interpolation: best}
+
+  - !<ColorSpace>
+    name: "DaVinci : Dolby Cin: ST 2084 PQ : Rec.2020 : 108 nits"
+    family: DaVinci/display_referred/Dolby Cin
+    equalitygroup: ""
+    bitdepth: 32f
+    description: "Dolby Cin: ST 2084 PQ : Rec.2020 : 108 nits"
+    isdata: false
+    allocation: uniform
+    allocationvars: [0, 1]
+    from_scene_reference: !<FileTransform> {src: DaVinci_ACES_to_Rec2020_PQ108nits.clf, interpolation: best}
+
+  - !<ColorSpace>
+    name: "DaVinci : Dolby: ST 2084 PQ : P3 D65 : 1000 nits"
+    family: DaVinci/display_referred/Dolby
+    equalitygroup: ""
+    bitdepth: 32f
+    description: "Dolby: ST 2084 PQ : P3 D65 : 1000 nits"
+    isdata: false
+    allocation: uniform
+    allocationvars: [0, 1]
+    from_scene_reference: !<FileTransform> {src: DaVinci_ACES_to_P3D65_PQ1000nits.clf, interpolation: best}
+
+  - !<ColorSpace>
+    name: "DaVinci : Dolby: ST 2084 PQ : P3 D65 : 2000 nits"
+    family: DaVinci/display_referred/Dolby
+    equalitygroup: ""
+    bitdepth: 32f
+    description: "Dolby: ST 2084 PQ : P3 D65 : 2000 nits"
+    isdata: false
+    allocation: uniform
+    allocationvars: [0, 1]
+    from_scene_reference: !<FileTransform> {src: DaVinci_ACES_to_P3D65_PQ2000nits.clf, interpolation: best}
+
+  - !<ColorSpace>
+    name: "DaVinci : Dolby: ST 2084 PQ : P3 D65 : 4000 nits"
+    family: DaVinci/display_referred/Dolby
+    equalitygroup: ""
+    bitdepth: 32f
+    description: "Dolby: ST 2084 PQ : P3 D65 : 4000 nits"
+    isdata: false
+    allocation: uniform
+    allocationvars: [0, 1]
+    from_scene_reference: !<FileTransform> {src: DaVinci_ACES_to_P3D65_PQ4000nits.clf, interpolation: best}
+
+  - !<ColorSpace>
+    name: "DaVinci : Dolby: ST 2084 PQ : P3 D65 : 500 nits"
+    family: DaVinci/display_referred/Dolby
+    equalitygroup: ""
+    bitdepth: 32f
+    description: "Dolby: ST 2084 PQ : P3 D65 : 500 nits"
+    isdata: false
+    allocation: uniform
+    allocationvars: [0, 1]
+    from_scene_reference: !<FileTransform> {src: DaVinci_ACES_to_P3D65_PQ500nits.clf, interpolation: best}
+
+  - !<ColorSpace>
+    name: "DaVinci : Rec.1886: 2.4 Gamma : Rec.709"
+    family: DaVinci/display_referred/Rec.1886
+    equalitygroup: ""
+    bitdepth: 32f
+    description: "Rec.1886: 2.4 Gamma : Rec.709"
+    isdata: false
+    allocation: uniform
+    allocationvars: [0, 1]
+    from_scene_reference: !<FileTransform> {src: DaVinci_ACES_to_Rec709_2_4y.clf, interpolation: best}
+
+  - !<ColorSpace>
+    name: "DaVinci : Rec.2020: 2.4 Gamma : Rec.2020"
+    family: DaVinci/display_referred/Rec.2020
+    equalitygroup: ""
+    bitdepth: 32f
+    description: "Rec.2020: 2.4 Gamma : Rec.2020"
+    isdata: false
+    allocation: uniform
+    allocationvars: [0, 1]
+    from_scene_reference: !<FileTransform> {src: DaVinci_ACES_to_Rec2020_2_4y.clf, interpolation: best}
+
+  - !<ColorSpace>
+    name: "DaVinci : Rec.2100 : HLG 1.2 Gamma : Rec.2020 : 1000 nits"
+    family: DaVinci/display_referred/Rec.2100
+    equalitygroup: ""
+    bitdepth: 32f
+    description: "Rec.2100 : HLG 1.2 Gamma : Rec.2020 : 1000 nits"
+    isdata: false
+    allocation: uniform
+    allocationvars: [0, 1]
+    from_scene_reference: !<FileTransform> {src: DaVinci_ACES_to_HLG_Rec2100.clf, interpolation: best}
+
+  - !<ColorSpace>
+    name: "DaVinci : Rec.2100 : ST 2084 PQ : Rec.2020 : 1000 nits"
+    family: DaVinci/display_referred/Rec.2100
+    equalitygroup: ""
+    bitdepth: 32f
+    description: "Rec.2100 : ST 2084 PQ : Rec.2020 : 1000 nits"
+    isdata: false
+    allocation: uniform
+    allocationvars: [0, 1]
+    from_scene_reference: !<FileTransform> {src: DaVinci_ACES_to_Rec2020_PQ1000nits.clf, interpolation: best}
+
+  - !<ColorSpace>
+    name: "DaVinci : Rec.2100 : ST 2084 PQ : Rec.2020 : 2000 nits"
+    family: DaVinci/display_referred/Rec.2100
+    equalitygroup: ""
+    bitdepth: 32f
+    description: "Rec.2100 : ST 2084 PQ : Rec.2020 : 2000 nits"
+    isdata: false
+    allocation: uniform
+    allocationvars: [0, 1]
+    from_scene_reference: !<FileTransform> {src: DaVinci_ACES_to_Rec2020_PQ2000nits.clf, interpolation: best}
+
+  - !<ColorSpace>
+    name: "DaVinci : Rec.2100 : ST 2084 PQ : Rec.2020 : 4000 nits"
+    family: DaVinci/display_referred/Rec.2100
+    equalitygroup: ""
+    bitdepth: 32f
+    description: "Rec.2100 : ST 2084 PQ : Rec.2020 : 4000 nits"
+    isdata: false
+    allocation: uniform
+    allocationvars: [0, 1]
+    from_scene_reference: !<FileTransform> {src: DaVinci_ACES_to_Rec2020_PQ4000nits.clf, interpolation: best}
+
+  - !<ColorSpace>
+    name: "DaVinci : Rec.2100 : ST 2084 PQ : Rec.2020 : 500 nits"
+    family: DaVinci/display_referred/Rec.2100
+    equalitygroup: ""
+    bitdepth: 32f
+    description: "Rec.2100 : ST 2084 PQ : Rec.2020 : 600 nits"
+    isdata: false
+    allocation: uniform
+    allocationvars: [0, 1]
+    from_scene_reference: !<FileTransform> {src: DaVinci_ACES_to_Rec2020_PQ500nits.clf, interpolation: best}
+
+  - !<ColorSpace>
+    name: "DaVinci : sRGB Display: Piecewise : Rec.709"
+    family: DaVinci/display_referred/sRGB
+    equalitygroup: ""
+    bitdepth: 32f
+    description: "sRGB Display: 2.2 Gamma : Rec.709"
+    isdata: false
+    allocation: uniform
+    allocationvars: [0, 1]
+    from_scene_reference: !<FileTransform> {src: DaVinci_ACES_to_sRGB.clf, interpolation: best}
+
+  - !<ColorSpace>
+    name: DaVinci Intermediate WideGamut
+    aliases: [davinci_intermediate_widegamut]
+    family: Input/BlackmagicDesign
+    equalitygroup: ""
+    bitdepth: 32f
+    description: |
+      Convert DaVinci Intermediate Wide Gamut to ACES2065-1
+
+      CLFtransformID: urn:aswf:ocio:transformId:1.0:BlackmagicDesign:Input:DaVinci_Intermediate_WideGamut_to_ACES2065-1:1.0
+      ACEStransformID: urn:ampas:aces:transformId:v2.0:CSC.Blackmagic.DaVinci_Intermediate_WideGamut_to_ACES.a2.v1
+      ACEStransformID: urn:ampas:aces:transformId:v1.5:ACEScsc.Academy.DaVinci_Intermediate_WideGamut_to_ACES.a1.v1
+    isdata: false
+    categories: [file-io]
+    encoding: log
+    allocation: uniform
+    to_scene_reference: !<GroupTransform>
+      name: DaVinci Intermediate Wide Gamut to ACES2065-1
+      children:
+        - !<LogCameraTransform> {log_side_slope: 0.07329248, log_side_offset: 0.51304736, lin_side_offset: 0.0075, lin_side_break: 0.00262409, linear_slope: 10.44426855, direction: inverse}
+        - !<MatrixTransform> {matrix: [0.748270290272981, 0.167694659554328, 0.0840350501726906, 0, 0.0208421234689102, 1.11190474268894, -0.132746866157851, 0, -0.0915122574225729, -0.127746712807307, 1.21925897022988, 0, 0, 0, 0, 1]}
+
+  - !<ColorSpace>
+    name: Linear DaVinci WideGamut
+    aliases: [lin_davinci_widegamut]
+    family: Input/BlackmagicDesign
+    equalitygroup: ""
+    bitdepth: 32f
+    description: Convert Linear DaVinci Wide Gamut to ACES2065-1
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GroupTransform>
+      name: Linear DaVinci Wide Gamut to ACES2065-1
+      children:
+        - !<MatrixTransform> {matrix: [0.748270290272981, 0.167694659554328, 0.0840350501726906, 0, 0.0208421234689102, 1.11190474268894, -0.132746866157851, 0, -0.0915122574225729, -0.127746712807307, 1.21925897022988, 0, 0, 0, 0, 1]}
+
+  - !<ColorSpace>
+    name: Raw
+    aliases: [Utility - Raw, none]
+    family: Utility
+    equalitygroup: ""
+    bitdepth: 32f
+    description: The utility "Raw" colorspace.
+    isdata: true
+    categories: [file-io, texture]
+    encoding: data
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: sRGB Encoded Rec.709 (sRGB)
+    aliases: [srgb_encoded_rec709_srgb, srgb_texture, srgb_rec709_scene, Utility - sRGB - Texture, Input - Generic - sRGB - Texture, sRGB - Texture, srgb_tx]
+    family: Utility
+    equalitygroup: ""
+    bitdepth: 32f
+    description: |
+      Convert ACES2065-1 to sRGB
+
+      CLFtransformID: urn:aswf:ocio:transformId:1.0:OCIO:Utility:AP0_to_sRGB-Encoded-Rec709:1.0
+    isdata: false
+    categories: [file-io, texture]
+    encoding: sdr-video
+    allocation: uniform
+    from_scene_reference: !<GroupTransform>
+      name: AP0 to sRGB Encoded Rec.709 (sRGB)
+      children:
+        - !<MatrixTransform> {matrix: [2.52168618674388, -1.13413098823972, -0.387555198504164, 0, -0.276479914229922, 1.37271908766826, -0.096239173438334, 0, -0.0153780649660342, -0.152975335867399, 1.16835340083343, 0, 0, 0, 0, 1]}
+        - !<ExponentWithLinearTransform> {gamma: 2.4, offset: 0.055, direction: inverse}

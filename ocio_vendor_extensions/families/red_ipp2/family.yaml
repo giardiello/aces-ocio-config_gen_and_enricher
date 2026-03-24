@@ -1,0 +1,23 @@
+schema_version: 1
+family: red_ipp2
+description: RED IPP2 RWG Log3G10 display-referred views (FACES)
+depends_on: []
+display_mappings:
+  'RED-IPP2 : Rec.1886: 2.4 Gamma : Rec.709 - MC-R1':
+  - Rec.1886 Rec.709 - Display
+  'RED-IPP2 : Rec.1886: 2.4 Gamma : Rec.709 - MC-R2':
+  - Rec.1886 Rec.709 - Display
+  'RED-IPP2 : Rec.1886: 2.4 Gamma : Rec.709 - MC-R3':
+  - Rec.1886 Rec.709 - Display
+  'RED-IPP2 : Rec.1886: 2.4 Gamma : Rec.709 - MC-R4':
+  - Rec.1886 Rec.709 - Display
+  'RED-IPP2 : Rec.1886: 2.4 Gamma : Rec.2020 - MC-R1':
+  - Rec.1886 Rec.2020 - Display
+  'RED-IPP2 : Rec.1886: 2.4 Gamma : Rec.2020 - MC-R2':
+  - Rec.1886 Rec.2020 - Display
+  'RED-IPP2 : Rec.1886: 2.4 Gamma : Rec.2020 - MC-R3':
+  - Rec.1886 Rec.2020 - Display
+  'RED-IPP2 : Rec.1886: 2.4 Gamma : Rec.2020 - MC-R4':
+  - Rec.1886 Rec.2020 - Display
+intermediates:
+- 'Linear REDWideGamutRGB'

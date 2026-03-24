@@ -1,0 +1,516 @@
+ocio_profile_version: 2.4
+
+environment:
+  {}
+search_path: luts
+strictparsing: true
+luma: [0.2126, 0.7152, 0.0722]
+
+roles:
+  aces_interchange: ACES2065-1
+  cie_xyz_d65_interchange: CIE XYZ-D65 - Display-referred
+  color_picking: sRGB Encoded Rec.709 (sRGB)
+  color_timing: ACEScct
+  compositing_log: ACEScct
+  data: Raw
+  matte_paint: ACEScct
+  scene_linear: ACEScg
+  texture_paint: sRGB Encoded Rec.709 (sRGB)
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: ACES2065-1}
+
+displays:
+  sRGB - Display:
+    - !<View> {name: Raw, colorspace: Raw}
+
+active_displays: []
+active_views: []
+
+view_transforms:
+  - !<ViewTransform>
+    name: Un-tone-mapped
+    from_scene_reference: !<BuiltinTransform> {style: UTILITY - ACES-AP0_to_CIE-XYZ-D65_BFD}
+
+display_colorspaces:
+  - !<ColorSpace>
+    name: CIE XYZ-D65 - Display-referred
+    aliases: [cie_xyz_d65_display, lin_ciexyzd65_display]
+    family: ""
+    equalitygroup: ""
+    bitdepth: 32f
+    description: The "CIE XYZ (D65)" display connection colorspace.
+    isdata: false
+    encoding: display-linear
+    allocation: uniform
+
+colorspaces:
+  - !<ColorSpace>
+    name: ACES2065-1
+    aliases: [aces2065_1, aces, ACES - ACES2065-1, lin_ap0, lin_ap0_scene]
+    family: ACES
+    equalitygroup: ""
+    bitdepth: 32f
+    description: The "Academy Color Encoding System" reference colorspace.
+    isdata: false
+    categories: [file-io, texture]
+    encoding: scene-linear
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: ACEScct
+    aliases: [ACES - ACEScct, acescct_ap1]
+    family: ACES
+    equalitygroup: ""
+    bitdepth: 32f
+    description: |
+      Convert ACEScct to ACES2065-1
+
+      ACEStransformID: urn:ampas:aces:transformId:v2.0:CSC.Academy.ACEScct_to_ACES.a2.v1
+
+      AMF Components
+      --------------
+      ACEStransformID: urn:ampas:aces:transformId:v2.0:CSC.Academy.ACES_to_ACEScct.a2.v1
+    isdata: false
+    categories: [file-io, working-space]
+    encoding: log
+    allocation: uniform
+    to_scene_reference: !<BuiltinTransform> {style: ACEScct_to_ACES2065-1}
+
+  - !<ColorSpace>
+    name: ACEScg
+    aliases: [ACES - ACEScg, lin_ap1, lin_ap1_scene]
+    family: ACES
+    equalitygroup: ""
+    bitdepth: 32f
+    description: |
+      Convert ACEScg to ACES2065-1
+
+      ACEStransformID: urn:ampas:aces:transformId:v2.0:CSC.Academy.ACEScg_to_ACES.a2.v1
+
+      AMF Components
+      --------------
+      ACEStransformID: urn:ampas:aces:transformId:v2.0:CSC.Academy.ACES_to_ACEScg.a2.v1
+    isdata: false
+    categories: [file-io, working-space, texture]
+    encoding: scene-linear
+    allocation: uniform
+    to_scene_reference: !<BuiltinTransform> {style: ACEScg_to_ACES2065-1}
+
+  - !<ColorSpace>
+    name: "FilmLight : DCI: 2.6 Gamma : P3 D60"
+    family: FilmLight/display_referred/DCI
+    equalitygroup: ""
+    bitdepth: 32f
+    description: "DCI: 2.6 Gamma : P3 D60"
+    isdata: false
+    allocation: uniform
+    allocationvars: [0, 1]
+    to_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_P3D60_inv.clf, interpolation: best}
+    from_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_P3D60.clf, interpolation: best}
+
+  - !<ColorSpace>
+    name: "FilmLight : DCI: 2.6 Gamma : P3 D65"
+    family: FilmLight/display_referred/DCI
+    equalitygroup: ""
+    bitdepth: 32f
+    description: "DCI: 2.6 Gamma : P3 D65"
+    isdata: false
+    allocation: uniform
+    allocationvars: [0, 1]
+    to_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_P3D65_inv.clf, interpolation: best}
+    from_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_P3D65.clf, interpolation: best}
+
+  - !<ColorSpace>
+    name: "FilmLight : DCI: 2.6 Gamma : P3 DCI"
+    family: FilmLight/display_referred/DCI
+    equalitygroup: ""
+    bitdepth: 32f
+    description: "DCI: 2.6 Gamma : P3 DCI"
+    isdata: false
+    allocation: uniform
+    allocationvars: [0, 1]
+    to_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_P3DCI_inv.clf, interpolation: best}
+    from_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_P3DCI.clf, interpolation: best}
+
+  - !<ColorSpace>
+    name: "FilmLight : DCI: 2.6 Gamma : X′Y′Z′"
+    family: FilmLight/display_referred/DCI
+    equalitygroup: ""
+    bitdepth: 32f
+    description: "DCI: 2.6 Gamma : X′Y′Z′"
+    isdata: false
+    allocation: uniform
+    allocationvars: [0, 1]
+    to_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_DCI_XYZ_inv.clf, interpolation: best}
+    from_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_DCI_XYZ.clf, interpolation: best}
+
+  - !<ColorSpace>
+    name: "FilmLight : DCI: ST 2084 PQ : P3 D65 : 300 nits"
+    family: FilmLight/display_referred/DCI
+    equalitygroup: ""
+    bitdepth: 32f
+    description: "DCI: ST 2084 PQ : P3 D65 : 300 nits"
+    isdata: false
+    allocation: uniform
+    allocationvars: [0, 1]
+    to_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_PQ_P3D65_300nits_inv.clf, interpolation: best}
+    from_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_PQ_P3D65_300nits.clf, interpolation: best}
+
+  - !<ColorSpace>
+    name: "FilmLight : DCI: ST 2084 PQ : Rec.2020 : 300 nits"
+    family: FilmLight/display_referred/DCI
+    equalitygroup: ""
+    bitdepth: 32f
+    description: "DCI: ST 2084 PQ : Rec.2020 : 300 nits"
+    isdata: false
+    allocation: uniform
+    allocationvars: [0, 1]
+    to_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_PQ_Rec2020_300nits_inv.clf, interpolation: best}
+    from_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_PQ_Rec2020_300nits.clf, interpolation: best}
+
+  - !<ColorSpace>
+    name: "FilmLight : DCI: ST 2084 PQ : X′Y′Z′ : 300 nits"
+    family: FilmLight/display_referred/DCI
+    equalitygroup: ""
+    bitdepth: 32f
+    description: "DCI: ST 2084 PQ : X′Y′Z′ : 300 nits"
+    isdata: false
+    allocation: uniform
+    allocationvars: [0, 1]
+    to_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_PQ_XYZ_300nits_inv.clf, interpolation: best}
+    from_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_PQ_XYZ_300nits.clf, interpolation: best}
+
+  - !<ColorSpace>
+    name: "FilmLight : Dolby Cin: ST 2084 PQ : P3 D65 : 108 nits"
+    family: FilmLight/display_referred/Dolby Cin
+    equalitygroup: ""
+    bitdepth: 32f
+    description: "Dolby Cin: ST 2084 PQ : P3 D65 : 108 nits"
+    isdata: false
+    allocation: uniform
+    allocationvars: [0, 1]
+    to_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_PQ_P3D65_108nits_inv.clf, interpolation: best}
+    from_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_PQ_P3D65_108nits.clf, interpolation: best}
+
+  - !<ColorSpace>
+    name: "FilmLight : Dolby Cin: ST 2084 PQ : Rec.2020 : 108 nits"
+    family: FilmLight/display_referred/Dolby Cin
+    equalitygroup: ""
+    bitdepth: 32f
+    description: "Dolby Cin: ST 2084 PQ : Rec.2020 : 108 nits"
+    isdata: false
+    allocation: uniform
+    allocationvars: [0, 1]
+    to_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_PQ_Rec2020_108nits_inv.clf, interpolation: best}
+    from_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_PQ_Rec2020_108nits.clf, interpolation: best}
+
+  - !<ColorSpace>
+    name: "FilmLight : Dolby Cin: ST 2084 PQ : X′Y′Z′ : 108 nits"
+    family: FilmLight/display_referred/Dolby Cin
+    equalitygroup: ""
+    bitdepth: 32f
+    description: "Dolby Cin: ST 2084 PQ : X′Y′Z′ : 108 nits"
+    isdata: false
+    allocation: uniform
+    allocationvars: [0, 1]
+    to_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_PQ_XYZ_108nits_inv.clf, interpolation: best}
+    from_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_PQ_XYZ_108nits.clf, interpolation: best}
+
+  - !<ColorSpace>
+    name: "FilmLight : Dolby: ST 2084 PQ : P3 D65 : 1000 nits"
+    family: FilmLight/display_referred/Dolby
+    equalitygroup: ""
+    bitdepth: 32f
+    description: "Dolby: ST 2084 PQ : P3 D65 : 1000 nits"
+    isdata: false
+    allocation: uniform
+    allocationvars: [0, 1]
+    to_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_PQ_P3D65_1000nits_inv.clf, interpolation: best}
+    from_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_PQ_P3D65_1000nits.clf, interpolation: best}
+
+  - !<ColorSpace>
+    name: "FilmLight : Dolby: ST 2084 PQ : P3 D65 : 10000 nits"
+    family: FilmLight/display_referred/Dolby
+    equalitygroup: ""
+    bitdepth: 32f
+    description: "Dolby: ST 2084 PQ : P3 D65 : 10000 nits"
+    isdata: false
+    allocation: uniform
+    allocationvars: [0, 1]
+    to_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_PQ_P3D65_10000nits_inv.clf, interpolation: best}
+    from_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_PQ_P3D65_10000nits.clf, interpolation: best}
+
+  - !<ColorSpace>
+    name: "FilmLight : Dolby: ST 2084 PQ : P3 D65 : 1600 nits"
+    family: FilmLight/display_referred/Dolby
+    equalitygroup: ""
+    bitdepth: 32f
+    description: "Dolby: ST 2084 PQ : P3 D65 : 1600 nits"
+    isdata: false
+    allocation: uniform
+    allocationvars: [0, 1]
+    to_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_PQ_P3D65_1600nits_inv.clf, interpolation: best}
+    from_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_PQ_P3D65_1600nits.clf, interpolation: best}
+
+  - !<ColorSpace>
+    name: "FilmLight : Dolby: ST 2084 PQ : P3 D65 : 2000 nits"
+    family: FilmLight/display_referred/Dolby
+    equalitygroup: ""
+    bitdepth: 32f
+    description: "Dolby: ST 2084 PQ : P3 D65 : 2000 nits"
+    isdata: false
+    allocation: uniform
+    allocationvars: [0, 1]
+    to_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_PQ_P3D65_2000nits_inv.clf, interpolation: best}
+    from_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_PQ_P3D65_2000nits.clf, interpolation: best}
+
+  - !<ColorSpace>
+    name: "FilmLight : Dolby: ST 2084 PQ : P3 D65 : 4000 nits"
+    family: FilmLight/display_referred/Dolby
+    equalitygroup: ""
+    bitdepth: 32f
+    description: "Dolby: ST 2084 PQ : P3 D65 : 4000 nits"
+    isdata: false
+    allocation: uniform
+    allocationvars: [0, 1]
+    to_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_PQ_P3D65_4000nits_inv.clf, interpolation: best}
+    from_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_PQ_P3D65_4000nits.clf, interpolation: best}
+
+  - !<ColorSpace>
+    name: "FilmLight : Dolby: ST 2084 PQ : P3 D65 : 5000 nits"
+    family: FilmLight/display_referred/Dolby
+    equalitygroup: ""
+    bitdepth: 32f
+    description: "Dolby: ST 2084 PQ : P3 D65 : 5000 nits"
+    isdata: false
+    allocation: uniform
+    allocationvars: [0, 1]
+    to_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_PQ_P3D65_5000nits_inv.clf, interpolation: best}
+    from_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_PQ_P3D65_5000nits.clf, interpolation: best}
+
+  - !<ColorSpace>
+    name: "FilmLight : Dolby: ST 2084 PQ : P3 D65 : 600 nits"
+    family: FilmLight/display_referred/Dolby
+    equalitygroup: ""
+    bitdepth: 32f
+    description: "Dolby: ST 2084 PQ : P3 D65 : 600 nits"
+    isdata: false
+    allocation: uniform
+    allocationvars: [0, 1]
+    to_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_PQ_P3D65_600nits_inv.clf, interpolation: best}
+    from_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_PQ_P3D65_600nits.clf, interpolation: best}
+
+  - !<ColorSpace>
+    name: "FilmLight : Linear : E-Gamut 2"
+    family: FilmLight/scene_referred
+    equalitygroup: ""
+    bitdepth: 32f
+    description: "FilmLight : Linear : E-Gamut 2"
+    isdata: false
+    allocation: lg2
+    allocationvars: [-10, 7, 0.005606562]
+    from_scene_reference: !<MatrixTransform> {matrix: [1.25992, -0.180662, -0.0792596, 0, 0.00486135, 0.944082, 0.0510565, 0, 0.121236, 0.0466471, 0.832117, 0, 0, 0, 0, 1]}
+
+  - !<ColorSpace>
+    name: "FilmLight : Rec.1886: 2.4 Gamma : Rec.709"
+    family: FilmLight/display_referred/Rec.1886
+    equalitygroup: ""
+    bitdepth: 32f
+    description: "Rec.1886: 2.4 Gamma : Rec.709"
+    isdata: false
+    allocation: uniform
+    allocationvars: [0, 1]
+    to_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_Rec709_inv.clf, interpolation: best}
+    from_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_Rec709.clf, interpolation: best}
+
+  - !<ColorSpace>
+    name: "FilmLight : Rec.2020: 2.4 Gamma : Rec.2020"
+    family: FilmLight/display_referred/Rec.2020
+    equalitygroup: ""
+    bitdepth: 32f
+    description: "Rec.2020: 2.4 Gamma : Rec.2020"
+    isdata: false
+    allocation: uniform
+    allocationvars: [0, 1]
+    to_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_Rec2020_inv.clf, interpolation: best}
+    from_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_Rec2020.clf, interpolation: best}
+
+  - !<ColorSpace>
+    name: "FilmLight : Rec.2100 : HLG 1.2 Gamma : Rec.2020 : 1000 nits"
+    family: FilmLight/display_referred/Rec.2100
+    equalitygroup: ""
+    bitdepth: 32f
+    description: "Rec.2100 : HLG 1.2 Gamma : Rec.2020 : 1000 nits"
+    isdata: false
+    allocation: uniform
+    allocationvars: [0, 1]
+    to_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_HLG_Rec2020_1000nits_inv.clf, interpolation: best}
+    from_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_HLG_Rec2020_1000nits.clf, interpolation: best}
+
+  - !<ColorSpace>
+    name: "FilmLight : Rec.2100 : HLG 1.2 Gamma : Rec.2020 : Preview SDR"
+    family: FilmLight/display_referred/Rec.2100
+    equalitygroup: ""
+    bitdepth: 32f
+    description: "Rec.2100 : HLG 1.2 Gamma : Rec.2020 : Preview SDR"
+    isdata: false
+    allocation: uniform
+    allocationvars: [0, 1]
+    to_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_HLG_Rec2020_PreviewSDR_inv.clf, interpolation: best}
+    from_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_HLG_Rec2020_PreviewSDR.clf, interpolation: best}
+
+  - !<ColorSpace>
+    name: "FilmLight : Rec.2100 : ST 2084 PQ : Rec.2020 : 1000 nits"
+    family: FilmLight/display_referred/Rec.2100
+    equalitygroup: ""
+    bitdepth: 32f
+    description: "Rec.2100 : ST 2084 PQ : Rec.2020 : 1000 nits"
+    isdata: false
+    allocation: uniform
+    allocationvars: [0, 1]
+    to_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_PQ_Rec2020_1000nits_inv.clf, interpolation: best}
+    from_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_PQ_Rec2020_1000nits.clf, interpolation: best}
+
+  - !<ColorSpace>
+    name: "FilmLight : Rec.2100 : ST 2084 PQ : Rec.2020 : 10000 nits"
+    family: FilmLight/display_referred/Rec.2100
+    equalitygroup: ""
+    bitdepth: 32f
+    description: "Rec.2100 : ST 2084 PQ : Rec.2020 : 10000 nits"
+    isdata: false
+    allocation: uniform
+    allocationvars: [0, 1]
+    to_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_PQ_Rec2020_10000nits_inv.clf, interpolation: best}
+    from_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_PQ_Rec2020_10000nits.clf, interpolation: best}
+
+  - !<ColorSpace>
+    name: "FilmLight : Rec.2100 : ST 2084 PQ : Rec.2020 : 1600 nits"
+    family: FilmLight/display_referred/Rec.2100
+    equalitygroup: ""
+    bitdepth: 32f
+    description: "Rec.2100 : ST 2084 PQ : Rec.2020 : 1600 nits"
+    isdata: false
+    allocation: uniform
+    allocationvars: [0, 1]
+    to_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_PQ_Rec2020_1600nits_inv.clf, interpolation: best}
+    from_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_PQ_Rec2020_1600nits.clf, interpolation: best}
+
+  - !<ColorSpace>
+    name: "FilmLight : Rec.2100 : ST 2084 PQ : Rec.2020 : 2000 nits"
+    family: FilmLight/display_referred/Rec.2100
+    equalitygroup: ""
+    bitdepth: 32f
+    description: "Rec.2100 : ST 2084 PQ : Rec.2020 : 2000 nits"
+    isdata: false
+    allocation: uniform
+    allocationvars: [0, 1]
+    to_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_PQ_Rec2020_2000nits_inv.clf, interpolation: best}
+    from_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_PQ_Rec2020_2000nits.clf, interpolation: best}
+
+  - !<ColorSpace>
+    name: "FilmLight : Rec.2100 : ST 2084 PQ : Rec.2020 : 4000 nits"
+    family: FilmLight/display_referred/Rec.2100
+    equalitygroup: ""
+    bitdepth: 32f
+    description: "Rec.2100 : ST 2084 PQ : Rec.2020 : 4000 nits"
+    isdata: false
+    allocation: uniform
+    allocationvars: [0, 1]
+    to_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_PQ_Rec2020_4000nits_inv.clf, interpolation: best}
+    from_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_PQ_Rec2020_4000nits.clf, interpolation: best}
+
+  - !<ColorSpace>
+    name: "FilmLight : Rec.2100 : ST 2084 PQ : Rec.2020 : 5000 nits"
+    family: FilmLight/display_referred/Rec.2100
+    equalitygroup: ""
+    bitdepth: 32f
+    description: "Rec.2100 : ST 2084 PQ : Rec.2020 : 5000 nits"
+    isdata: false
+    allocation: uniform
+    allocationvars: [0, 1]
+    to_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_PQ_Rec2020_5000nits_inv.clf, interpolation: best}
+    from_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_PQ_Rec2020_5000nits.clf, interpolation: best}
+
+  - !<ColorSpace>
+    name: "FilmLight : Rec.2100 : ST 2084 PQ : Rec.2020 : 600 nits"
+    family: FilmLight/display_referred/Rec.2100
+    equalitygroup: ""
+    bitdepth: 32f
+    description: "Rec.2100 : ST 2084 PQ : Rec.2020 : 600 nits"
+    isdata: false
+    allocation: uniform
+    allocationvars: [0, 1]
+    to_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_PQ_Rec2020_600nits_inv.clf, interpolation: best}
+    from_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_PQ_Rec2020_600nits.clf, interpolation: best}
+
+  - !<ColorSpace>
+    name: "FilmLight : T-Log : E-Gamut 2"
+    family: FilmLight/scene_referred
+    equalitygroup: ""
+    bitdepth: 32f
+    description: "FilmLight : T-Log : E-Gamut 2"
+    isdata: false
+    allocation: uniform
+    allocationvars: [0, 1]
+    to_scene_reference: !<GroupTransform>
+      name: FilmLight T-Log E-Gamut 2 to ACES2065-1
+      children:
+        - !<LogCameraTransform> {base: 2.718281828459045, log_side_slope: 0.09232902596577353, log_side_offset: 0.5520126568606655, lin_side_slope: 1.0, lin_side_offset: 0.0057048244042473785, lin_side_break: 0.0, linear_slope: 16.184376489665897, direction: inverse}
+        - !<MatrixTransform> {matrix: [0.786791192063810, 0.147306103551601, 0.065903978756014, 0, 0.002154493913007, 1.062854395534887, -0.065008720071672, 0, -0.114752994896219, -0.081043745103318, 1.195796424658541, 0, 0, 0, 0, 1]}
+
+  - !<ColorSpace>
+    name: "FilmLight : sRGB Display: 2.2 Gamma : Rec.709"
+    family: FilmLight/display_referred/sRGB
+    equalitygroup: ""
+    bitdepth: 32f
+    description: "sRGB Display: 2.2 Gamma : Rec.709"
+    isdata: false
+    allocation: uniform
+    allocationvars: [0, 1]
+    to_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_sRGB_Display_inv.clf, interpolation: best}
+    from_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_sRGB_Display.clf, interpolation: best}
+
+  - !<ColorSpace>
+    name: "FilmLight : sRGB: ~2.2 Gamma : Rec.709"
+    family: FilmLight/display_referred/sRGB
+    equalitygroup: ""
+    bitdepth: 32f
+    description: "sRGB: ~2.2 Gamma : Rec.709"
+    isdata: false
+    allocation: uniform
+    allocationvars: [0, 1]
+    to_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_sRGB_inv.clf, interpolation: best}
+    from_scene_reference: !<FileTransform> {src: FilmLight_ACES_to_sRGB.clf, interpolation: best}
+
+  - !<ColorSpace>
+    name: Raw
+    aliases: [Utility - Raw, none]
+    family: Utility
+    equalitygroup: ""
+    bitdepth: 32f
+    description: The utility "Raw" colorspace.
+    isdata: true
+    categories: [file-io, texture]
+    encoding: data
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: sRGB Encoded Rec.709 (sRGB)
+    aliases: [srgb_encoded_rec709_srgb, srgb_texture, srgb_rec709_scene, Utility - sRGB - Texture, Input - Generic - sRGB - Texture, sRGB - Texture, srgb_tx]
+    family: Utility
+    equalitygroup: ""
+    bitdepth: 32f
+    description: |
+      Convert ACES2065-1 to sRGB
+
+      CLFtransformID: urn:aswf:ocio:transformId:1.0:OCIO:Utility:AP0_to_sRGB-Encoded-Rec709:1.0
+    isdata: false
+    categories: [file-io, texture]
+    encoding: sdr-video
+    allocation: uniform
+    from_scene_reference: !<GroupTransform>
+      name: AP0 to sRGB Encoded Rec.709 (sRGB)
+      children:
+        - !<MatrixTransform> {matrix: [2.52168618674388, -1.13413098823972, -0.387555198504164, 0, -0.276479914229922, 1.37271908766826, -0.096239173438334, 0, -0.0153780649660342, -0.152975335867399, 1.16835340083343, 0, 0, 0, 0, 1]}
+        - !<ExponentWithLinearTransform> {gamma: 2.4, offset: 0.055, direction: inverse}

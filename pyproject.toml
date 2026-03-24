@@ -1,0 +1,66 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aces-ocio-config-generator"
+version = "1.0.0"
+description = "Generate, enrich, and validate ACES OCIO configurations across multiple OCIO and ACES versions"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+dependencies = [
+    "opencolorio>=2.3",
+    "numpy>=1.24",
+    "requests>=2.28",
+    "pyyaml>=6.0",
+    "pydantic>=2.0",
+]
+
+[project.scripts]
+ocio-aces-tool = "ocio_aces_tools.cli:main"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+]
+test = [
+    "pytest>=7.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.setuptools]
+py-modules = [
+    "ACES_json_to_OCIOmapping",
+    "build_all_configs",
+    "generate_lut_based_config",
+    "upgrade_ocio_v24_to_v25",
+    "validate_amf_output_transforms",
+    "split_config_by_aces_version",
+    "verify_configs",
+    "verify_lut_vs_builtin",
+    "ocio_builtins_display",
+    "add_missing_cscs",
+    "benchmark_cms_inverse_shaders",
+    "optimize_inverse_log_encoding",
+]
+
+[tool.setuptools.packages.find]
+include = [
+    "ocio_aces_tools*",
+    "ocio_aces_enricher*",
+    "ocio_vendor_extensions*",
+]
+
+[tool.setuptools.package-data]
+"ocio_aces_enricher" = [
+    "colorspace_repository/**/*.ocio",
+]
+"ocio_vendor_extensions" = [
+    "families/**/*.yaml",
+    "families/**/*.ocio",
+    "families/**/*.cube",
+    "families/**/*.cub",
+    "families/**/*.spimtx",
+]

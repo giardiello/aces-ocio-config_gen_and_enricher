@@ -1,0 +1,38 @@
+ocio_profile_version: 2.4
+
+environment:
+  {}
+search_path: ""
+strictparsing: true
+luma: [0.2126, 0.7152, 0.0722]
+
+roles:
+  aces_interchange: ACES2065-1
+  scene_linear: ACES2065-1
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: ACES2065-1}
+
+displays:
+  sRGB - Display:
+    - !<View> {name: Raw, colorspace: Raw}
+
+active_displays: [sRGB - Display]
+active_views: [Raw]
+
+default_view_transform: ""
+
+colorspaces:
+  - !<ColorSpace>
+    name: ACES2065-1
+    family: ACES
+    bitdepth: 32f
+    isdata: false
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: Raw
+    family: Utility
+    bitdepth: 32f
+    isdata: true
+    allocation: uniform

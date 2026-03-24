@@ -1,0 +1,55 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+*.so
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+.venv_*/
+venv/
+
+# IDE
+.cursor/
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Generated output (large, regenerable)
+OUTPUT_CONFIGS/
+OUTPUT/
+
+# Test artifacts
+TEST_ENRICHMENT/
+test_assets/
+
+# Agent transcripts
+agent-transcripts/
+
+# Large binary / data directories (not suitable for git)
+INPUT_OCIO/FACES_OCIO/
+INPUT_OCIO/aces2_ocio21_config/
+ocio_vendor_extensions/families_pre_clf/
+ocio_aces_enricher/colorspace_repository/
+CSV_REVIEW/
+
+# Vendor LUT/CLF files (large, regenerable via scripts/bake_vendor_clfs.sh)
+ocio_vendor_extensions/families/*/luts/
+
+# Binary assets
+*.exr
+INPUT_OCIO.zip
+
+# Pytest
+.pytest_cache/
+
+# Type checking
+.mypy_cache/
+.ruff_cache/

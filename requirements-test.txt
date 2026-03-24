@@ -1,0 +1,4 @@
+# Optional: CMS/DPX pipeline (test_cms_display_acescct_lut.py)
+numpy
+OpenImageIO>=2.4
+# PyOpenColorIO installed separately (system or pip)

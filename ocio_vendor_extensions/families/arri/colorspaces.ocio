@@ -1,0 +1,267 @@
+ocio_profile_version: 2.4
+
+environment:
+  {}
+search_path: luts
+strictparsing: true
+luma: [0.2126, 0.7152, 0.0722]
+
+roles:
+  aces_interchange: ACES2065-1
+  cie_xyz_d65_interchange: CIE XYZ-D65 - Display-referred
+  color_picking: sRGB Encoded Rec.709 (sRGB)
+  color_timing: ACEScct
+  compositing_log: ACEScct
+  data: Raw
+  matte_paint: ACEScct
+  scene_linear: ACEScg
+  texture_paint: sRGB Encoded Rec.709 (sRGB)
+
+file_rules:
+  - !<Rule> {name: Default, colorspace: ACES2065-1}
+
+displays:
+  sRGB - Display:
+    - !<View> {name: Raw, colorspace: Raw}
+
+active_displays: []
+active_views: []
+
+view_transforms:
+  - !<ViewTransform>
+    name: Un-tone-mapped
+    from_scene_reference: !<BuiltinTransform> {style: UTILITY - ACES-AP0_to_CIE-XYZ-D65_BFD}
+
+display_colorspaces:
+  - !<ColorSpace>
+    name: CIE XYZ-D65 - Display-referred
+    aliases: [cie_xyz_d65_display, lin_ciexyzd65_display]
+    family: ""
+    equalitygroup: ""
+    bitdepth: 32f
+    description: The "CIE XYZ (D65)" display connection colorspace.
+    isdata: false
+    encoding: display-linear
+    allocation: uniform
+
+colorspaces:
+  - !<ColorSpace>
+    name: ACES2065-1
+    aliases: [aces2065_1, aces, ACES - ACES2065-1, lin_ap0, lin_ap0_scene]
+    family: ACES
+    equalitygroup: ""
+    bitdepth: 32f
+    description: The "Academy Color Encoding System" reference colorspace.
+    isdata: false
+    categories: [file-io, texture]
+    encoding: scene-linear
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: ACEScct
+    aliases: [ACES - ACEScct, acescct_ap1]
+    family: ACES
+    equalitygroup: ""
+    bitdepth: 32f
+    description: |
+      Convert ACEScct to ACES2065-1
+
+      ACEStransformID: urn:ampas:aces:transformId:v2.0:CSC.Academy.ACEScct_to_ACES.a2.v1
+
+      AMF Components
+      --------------
+      ACEStransformID: urn:ampas:aces:transformId:v2.0:CSC.Academy.ACES_to_ACEScct.a2.v1
+    isdata: false
+    categories: [file-io, working-space]
+    encoding: log
+    allocation: uniform
+    to_scene_reference: !<BuiltinTransform> {style: ACEScct_to_ACES2065-1}
+
+  - !<ColorSpace>
+    name: ACEScg
+    aliases: [ACES - ACEScg, lin_ap1, lin_ap1_scene]
+    family: ACES
+    equalitygroup: ""
+    bitdepth: 32f
+    description: |
+      Convert ACEScg to ACES2065-1
+
+      ACEStransformID: urn:ampas:aces:transformId:v2.0:CSC.Academy.ACEScg_to_ACES.a2.v1
+
+      AMF Components
+      --------------
+      ACEStransformID: urn:ampas:aces:transformId:v2.0:CSC.Academy.ACES_to_ACEScg.a2.v1
+    isdata: false
+    categories: [file-io, working-space, texture]
+    encoding: scene-linear
+    allocation: uniform
+    to_scene_reference: !<BuiltinTransform> {style: ACEScg_to_ACES2065-1}
+
+  - !<ColorSpace>
+    name: "ARRI : DCI: 2.6 Gamma : P3 D65"
+    family: ARRI/display_referred/DCI
+    equalitygroup: ""
+    bitdepth: 32f
+    description: "DCI: 2.6 Gamma : P3 D65"
+    isdata: false
+    allocation: uniform
+    allocationvars: [0, 1]
+    from_scene_reference: !<FileTransform> {src: ARRI_ACES_to_P3D65_davinci3d_33.clf, interpolation: best}
+
+  - !<ColorSpace>
+    name: "ARRI : Rec.1886: 2.4 Gamma : Rec.709"
+    family: ARRI/display_referred/Rec.1886
+    equalitygroup: ""
+    bitdepth: 32f
+    description: "Rec.1886: 2.4 Gamma : Rec.709"
+    isdata: false
+    allocation: uniform
+    allocationvars: [0, 1]
+    from_scene_reference: !<FileTransform> {src: ARRI_ACES_to_Rec709_davinci3d_33.clf, interpolation: best}
+
+  - !<ColorSpace>
+    name: "ARRI : Rec.1886: 2.4 Gamma : Rec.709 (Classic)"
+    family: ARRI/display_referred/Rec.1886
+    equalitygroup: ""
+    bitdepth: 32f
+    description: "Rec.1886: 2.4 Gamma : Rec.709 (Classic)"
+    isdata: false
+    allocation: uniform
+    allocationvars: [0, 1]
+    from_scene_reference: !<FileTransform> {src: ARRI_ACES_to_Rec709_Classic_davinci3d_33.clf, interpolation: best}
+
+  - !<ColorSpace>
+    name: "ARRI : Rec.2020: 2.4 Gamma : Rec.2020"
+    family: ARRI/display_referred/Rec.2020
+    equalitygroup: ""
+    bitdepth: 32f
+    description: "Rec.2020: 2.4 Gamma : Rec.2020"
+    isdata: false
+    allocation: uniform
+    allocationvars: [0, 1]
+    from_scene_reference: !<FileTransform> {src: ARRI_ACES_to_Rec2020_davinci3d_33.clf, interpolation: best}
+
+  - !<ColorSpace>
+    name: "ARRI : Rec.2100 : HLG 1.2 Gamma : Rec.2020 : 1000 nits"
+    family: ARRI/display_referred/Rec.2100
+    equalitygroup: ""
+    bitdepth: 32f
+    description: "Rec.2100 : HLG 1.2 Gamma : Rec.2020 : 1000 nits"
+    isdata: false
+    allocation: uniform
+    allocationvars: [0, 1]
+    from_scene_reference: !<FileTransform> {src: ARRI_ACES_to_Rec2100HLG_1000nits_davinci3d_33.clf, interpolation: best}
+
+  - !<ColorSpace>
+    name: "ARRI : Rec.2100 : ST 2084 PQ : Rec.2020 : 1000 nits"
+    family: ARRI/display_referred/Rec.2100
+    equalitygroup: ""
+    bitdepth: 32f
+    description: "Rec.2100 : ST 2084 PQ : Rec.2020 : 1000 nits"
+    isdata: false
+    allocation: uniform
+    allocationvars: [0, 1]
+    from_scene_reference: !<FileTransform> {src: ARRI_ACES_to_Rec2100PQ_1000nits_davinci3d_33.clf, interpolation: best}
+
+  - !<ColorSpace>
+    name: ARRI LogC3 (EI800)
+    aliases: [arri_logc3_ei800, logc3ei800_alexawide, Input - ARRI - V3 LogC (EI800) - Wide Gamut]
+    family: Input/ARRI
+    equalitygroup: ""
+    bitdepth: 32f
+    description: |
+      Convert ARRI LogC3 (EI800) to ACES2065-1
+
+      CLFtransformID: urn:aswf:ocio:transformId:1.0:ARRI:Input:ARRI_LogC3_EI800_to_ACES2065-1:1.0
+      ACEStransformID: urn:ampas:aces:transformId:v2.0:CSC.Arri.LogCv3_to_ACES.a2.v1
+      ACEStransformID: urn:ampas:aces:transformId:v1.5:IDT.ARRI.Alexa-v3-logC-EI800.a1.v2
+
+      AMF Components
+      --------------
+      ACEStransformID: urn:ampas:aces:transformId:v1.5:ACEScsc.Academy.LogC_EI800_AWG_to_ACES.a1.1.0
+      ACEStransformID: urn:ampas:aces:transformId:v1.5:ACEScsc.Academy.ACES_to_LogC_EI800_AWG.a1.1.0
+      ACEStransformID: urn:ampas:aces:transformId:v1.5:ACEScsc.Academy.LogC_EI800_AWG_to_ACES.a1.1.0
+    isdata: false
+    categories: [file-io]
+    encoding: log
+    allocation: uniform
+    to_scene_reference: !<GroupTransform>
+      name: ARRI LogC3 (EI800) to ACES2065-1
+      children:
+        - !<LogCameraTransform> {base: 10, log_side_slope: 0.247189638318671, log_side_offset: 0.385536998692443, lin_side_slope: 5.55555555555556, lin_side_offset: 0.0522722750251688, lin_side_break: 0.0105909904954696, direction: inverse}
+        - !<MatrixTransform> {matrix: [0.680205505106279, 0.236136601606481, 0.0836578932872398, 0, 0.0854149797421404, 1.01747087860704, -0.102885858349182, 0, 0.00205652166929683, -0.0625625003847921, 1.06050597871549, 0, 0, 0, 0, 1]}
+
+  - !<ColorSpace>
+    name: ARRI LogC4
+    aliases: [arri_logc4]
+    family: Input/ARRI
+    equalitygroup: ""
+    bitdepth: 32f
+    description: Convert ARRI LogC4 to ACES2065-1
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GroupTransform>
+      name: ARRI LogC4 to ACES2065-1
+      children:
+        - !<LogCameraTransform> {log_side_slope: 0.0647954196341293, log_side_offset: -0.295908392682586, lin_side_slope: 2231.82630906769, lin_side_offset: 64, lin_side_break: -0.0180569961199113, direction: inverse}
+        - !<MatrixTransform> {matrix: [0.750957362824734, 0.144422786709757, 0.104619850465509, 0, 0.000821837079380207, 1.007397584885, -0.00821942196438358, 0, -0.000499952143533471, -0.000854177231436971, 1.00135412937497, 0, 0, 0, 0, 1]}
+
+  - !<ColorSpace>
+    name: Linear ARRI Wide Gamut 3
+    aliases: [lin_arri_wide_gamut_3, lin_alexawide]
+    family: Input/ARRI
+    equalitygroup: ""
+    bitdepth: 32f
+    description: Convert Linear ARRI Wide Gamut 3 to ACES2065-1
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GroupTransform>
+      name: Linear ARRI Wide Gamut 3 to ACES2065-1
+      children:
+        - !<MatrixTransform> {matrix: [0.680205505106279, 0.236136601606481, 0.0836578932872398, 0, 0.0854149797421404, 1.01747087860704, -0.102885858349182, 0, 0.00205652166929683, -0.0625625003847921, 1.06050597871549, 0, 0, 0, 0, 1]}
+
+  - !<ColorSpace>
+    name: Linear ARRI Wide Gamut 4
+    aliases: [lin_arri_wide_gamut_4, lin_awg4]
+    family: Input/ARRI
+    equalitygroup: ""
+    bitdepth: 32f
+    description: Convert Linear ARRI Wide Gamut 4 to ACES2065-1
+    isdata: false
+    allocation: uniform
+    to_scene_reference: !<GroupTransform>
+      name: Linear ARRI Wide Gamut 4 to ACES2065-1
+      children:
+        - !<MatrixTransform> {matrix: [0.750957362824734, 0.144422786709757, 0.104619850465509, 0, 0.000821837079380207, 1.007397584885, -0.00821942196438358, 0, -0.000499952143533471, -0.000854177231436971, 1.00135412937497, 0, 0, 0, 0, 1]}
+
+  - !<ColorSpace>
+    name: Raw
+    aliases: [Utility - Raw, none]
+    family: Utility
+    equalitygroup: ""
+    bitdepth: 32f
+    description: The utility "Raw" colorspace.
+    isdata: true
+    categories: [file-io, texture]
+    encoding: data
+    allocation: uniform
+
+  - !<ColorSpace>
+    name: sRGB Encoded Rec.709 (sRGB)
+    aliases: [srgb_encoded_rec709_srgb, srgb_texture, srgb_rec709_scene, Utility - sRGB - Texture, Input - Generic - sRGB - Texture, sRGB - Texture, srgb_tx]
+    family: Utility
+    equalitygroup: ""
+    bitdepth: 32f
+    description: |
+      Convert ACES2065-1 to sRGB
+
+      CLFtransformID: urn:aswf:ocio:transformId:1.0:OCIO:Utility:AP0_to_sRGB-Encoded-Rec709:1.0
+    isdata: false
+    categories: [file-io, texture]
+    encoding: sdr-video
+    allocation: uniform
+    from_scene_reference: !<GroupTransform>
+      name: AP0 to sRGB Encoded Rec.709 (sRGB)
+      children:
+        - !<MatrixTransform> {matrix: [2.52168618674388, -1.13413098823972, -0.387555198504164, 0, -0.276479914229922, 1.37271908766826, -0.096239173438334, 0, -0.0153780649660342, -0.152975335867399, 1.16835340083343, 0, 0, 0, 0, 1]}
+        - !<ExponentWithLinearTransform> {gamma: 2.4, offset: 0.055, direction: inverse}

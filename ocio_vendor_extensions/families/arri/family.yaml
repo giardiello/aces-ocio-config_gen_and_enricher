@@ -1,0 +1,22 @@
+schema_version: 1
+family: arri
+description: ARRI LogC2 video display-referred views (FACES)
+depends_on: []
+display_mappings:
+  'ARRI : Rec.1886: 2.4 Gamma : Rec.709':
+  - Rec.1886 Rec.709 - Display
+  'ARRI : Rec.1886: 2.4 Gamma : Rec.709 (Classic)':
+  - Rec.1886 Rec.709 - Display
+  'ARRI : DCI: 2.6 Gamma : P3 D65':
+  - Display P3 - Display
+  - P3-D65 - Display
+  'ARRI : Rec.2020: 2.4 Gamma : Rec.2020':
+  - Rec.1886 Rec.2020 - Display
+  'ARRI : Rec.2100 : HLG 1.2 Gamma : Rec.2020 : 1000 nits':
+  - Rec.2100-HLG - Display
+  'ARRI : Rec.2100 : ST 2084 PQ : Rec.2020 : 1000 nits':
+  - Rec.2100-PQ - Display
+intermediates:
+- 'ARRI LogC4'
+- 'Linear ARRI Wide Gamut 3'
+- 'Linear ARRI Wide Gamut 4'
