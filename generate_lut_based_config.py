@@ -2374,14 +2374,8 @@ def generate_v23_config(ref_config_path, vt_to_clf, curve_lut_files, csc_lut_fil
 
     config_text = migrate_interchange_to_description(config_text)
 
-    # Strip remaining v2.5 interchange attributes (not valid in v2.3)
-    config_text = re.sub(
-        r'^\s*aces_interchange:.*\n', '', config_text, flags=re.MULTILINE
-    )
-    config_text = re.sub(
-        r'^\s*cie_xyz_d65_interchange:.*\n', '', config_text, flags=re.MULTILINE
-    )
-    # Any remaining interchange blocks (single-line form, no URNs, etc.)
+    # Strip remaining per-item interchange blocks (single-line form, no URNs, etc.)
+    # but preserve aces_interchange / cie_xyz_d65_interchange role assignments.
     config_text = re.sub(
         r'^\s*interchange:\s*\n\s+amf_transform_ids:\s*\S.*\n',
         '',
