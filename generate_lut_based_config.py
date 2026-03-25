@@ -2244,59 +2244,86 @@ def migrate_interchange_to_description(text):
         urns = [u.strip() for u in m.group('urns').strip().splitlines() if u.strip()]
         if not urns:
             continue
-        aces_block = '\n'.join(f'      ACEStransformID: {u}' for u in urns)
 
         block_start = m.start()
         preceding = text[:block_start]
 
+        ic_indent = m.group('indent')
+        if len(ic_indent) >= 2:
+            parent_indent = ic_indent[:len(ic_indent) - 2]
+            block_marker_pat = re.compile(
+                r'^' + re.escape(parent_indent) + r'- !<\w+>',
+                re.MULTILINE,
+            )
+            block_markers = list(block_marker_pat.finditer(preceding))
+            block_region_start = block_markers[-1].start() if block_markers else 0
+        else:
+            block_region_start = 0
+
         desc_pat = re.compile(
-            r'^(?P<full>'
             r'(?P<indent>[ \t]*)description:[ \t]*'
             r'(?P<val>[^\n]*)\n'
-            r'(?P<body>(?:[ \t]+[^\n]+\n)*)'
-            r')',
+            r'(?P<body>(?:[ \t]+[^\n]+\n)*)',
             re.MULTILINE,
         )
-        desc_match = None
-        for dm in desc_pat.finditer(preceding):
-            desc_match = dm
+        desc_abs_start = None
+        desc_abs_end = None
+        desc_groups = None
+        for dm in desc_pat.finditer(preceding, pos=block_region_start):
+            desc_abs_start = dm.start()
+            desc_abs_end = dm.end()
+            desc_groups = {
+                'indent': dm.group('indent'),
+                'val': dm.group('val'),
+                'body': dm.group('body'),
+            }
 
-        if desc_match:
-            val = desc_match.group('val').strip()
-            body = desc_match.group('body').rstrip('\n')
+        if desc_abs_start is not None:
+            val = desc_groups['val'].strip()
+            body = desc_groups['body'].rstrip('\n')
+            desc_indent = desc_groups['indent']
+            body_indent = desc_indent + '  '
+            aces_lines = '\n'.join(
+                f'{body_indent}ACEStransformID: {u}' for u in urns
+            )
             if val.startswith('|'):
                 if body:
                     new_desc = (
-                        f'    description: |\n'
+                        f'{desc_indent}description: |\n'
                         f'{body}\n\n'
-                        f'{aces_block}\n'
+                        f'{aces_lines}\n'
                     )
                 else:
                     new_desc = (
-                        f'    description: |\n'
-                        f'{aces_block}\n'
+                        f'{desc_indent}description: |\n'
+                        f'{aces_lines}\n'
                     )
             elif val:
                 new_desc = (
-                    f'    description: |\n'
-                    f'      {val}\n\n'
-                    f'{aces_block}\n'
+                    f'{desc_indent}description: |\n'
+                    f'{body_indent}{val}\n\n'
+                    f'{aces_lines}\n'
                 )
             else:
                 new_desc = (
-                    f'    description: |\n'
-                    f'{aces_block}\n'
+                    f'{desc_indent}description: |\n'
+                    f'{aces_lines}\n'
                 )
             text = (
-                text[:desc_match.start()]
+                text[:desc_abs_start]
                 + new_desc
-                + text[desc_match.end():m.start()]
+                + text[desc_abs_end:m.start()]
                 + text[m.end():]
             )
         else:
+            ic_indent = m.group("indent")
+            ic_body_indent = ic_indent + '  '
+            fallback_lines = '\n'.join(
+                f'{ic_body_indent}ACEStransformID: {u}' for u in urns
+            )
             replacement = (
-                f'{m.group("indent")}description: |\n'
-                f'{aces_block}\n'
+                f'{ic_indent}description: |\n'
+                f'{fallback_lines}\n'
             )
             text = text[:m.start()] + replacement + text[m.end():]
 
