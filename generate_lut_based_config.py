@@ -74,7 +74,18 @@ CURVE_BUILTINS_V22 = {
 CSC_BUILTINS_V22 = {
     "CANON_CLOG2-CGAMUT_to_ACES2065-1": "CSC_CanonCLog2CGamut_to_ACES2065-1",
     "CANON_CLOG3-CGAMUT_to_ACES2065-1": "CSC_CanonCLog3CGamut_to_ACES2065-1",
+    "ARRI_LOGC4_to_ACES2065-1": "CSC_ArriLogC4_to_ACES2065-1",
 }
+
+# BT.2020 (Linear Rec.2020) to ACES2065-1 (AP0) matrix — from the official
+# ACES v2.0 config.  Used inline to replace ColorSpaceTransform references to
+# "Linear Rec.2020" which doesn't exist in reference configs.
+BT2020_TO_AP0_MATRIX_YAML = (
+    "0.679085634706913, 0.157700914643159, 0.163213450649929, 0, "
+    "0.0460020030800595, 0.859054673002905, 0.0949433239170316, 0, "
+    "-0.000573943187616201, 0.0284677684080262, 0.972106174779585, 0, "
+    "0, 0, 0, 1"
+)
 
 XYZ_D65_TO_REC709_MATRIX = (
     "3.2409699419045, -1.5373831775701, -0.4986107602930, 0, "
@@ -2352,6 +2363,16 @@ def generate_v23_config(ref_config_path, vt_to_clf, curve_lut_files, csc_lut_fil
     # Strip interop_id (v2.5 attribute, not valid in v2.3)
     config_text = re.sub(
         r'^\s*interop_id:.*\n', '', config_text, flags=re.MULTILINE
+    )
+
+    # Replace ColorSpaceTransform references to "Linear Rec.2020" with an
+    # inline BT.2020->AP0 MatrixTransform.  The reference config uses this CS
+    # in Canon CLog2/CLog3 BT2020 color spaces, but "Linear Rec.2020" only
+    # exists in studio configs — not in reference configs.
+    config_text = re.sub(
+        r'- !<ColorSpaceTransform>\s*\{src:\s*Linear Rec\.2020,\s*dst:\s*ACES2065-1\}',
+        f'- !<MatrixTransform> {{matrix: [{BT2020_TO_AP0_MATRIX_YAML}]}}',
+        config_text,
     )
 
     # Replace ACES 2.0 VT BuiltIns with CLF FileTransforms (forward + inverse)
