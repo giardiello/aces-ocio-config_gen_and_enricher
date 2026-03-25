@@ -178,6 +178,10 @@ bake sony "SL3SG3tos709.cube" "Sony_ACES_to_Rec709.clf" "S-Log3" "Venice S-Gamut
 bake sony "SL3SG3tosP3D65.cube" "Sony_ACES_to_P3D65.clf" "S-Log3" "Venice S-Gamut3"
 
 echo ""
+echo "=== Formatting CLF files ==="
+python3 "$REPO_DIR/scripts/format_clf.py" --dir "$FAMILIES_DIR"
+
+echo ""
 echo "=== Done ==="
 echo "  Success: $SUCCESS"
 echo "  Failed:  $FAIL"
