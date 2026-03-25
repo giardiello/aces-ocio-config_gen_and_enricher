@@ -245,6 +245,11 @@ TEMP_PASSTHROUGH_CS = '__CIE-XYZ-D65-Passthrough__'
 TEMP_INVERSE_CS = '__inverse_temp__'
 # Display-referred bake source: inverse VT maps this space -> AP0 (to_reference).
 INVERSE_LUT_DISPLAY_SRC = '__inverse_lut_display_src__'
+# ACEScct-domain bake: temp scene-referred CS for forward/inverse LUT baking.
+TEMP_ACESCCT_FWD_CS = '__acescct_fwd_bake__'
+TEMP_ACESCCT_INV_CS = '__acescct_inv_bake__'
+TEMP_DISPSHAPER_FWD_CS = '__dispshaper_fwd_bake__'
+TEMP_DISPSHAPER_INV_CS = '__dispshaper_inv_bake__'
 
 # Inverse LUT input shaper: a power curve applied to AP0 display-linear
 # values before they enter the 3D LUT.  Without this, the entire shadow region
@@ -1138,6 +1143,833 @@ def build_inverse_clf(config, cube_path, clf_path, cc_decode_ops,
     return len(combined)
 
 
+# ---------------------------------------------------------------------------
+# ACEScct-domain bake/build: symmetric ACEScct-in / ACEScct-out LUTs
+# ---------------------------------------------------------------------------
+
+def _get_vt_builtin_style(config, vt_name):
+    """Return the BuiltinTransform style string for a named ViewTransform."""
+    vt = config.getViewTransform(vt_name)
+    t = vt.getTransform(ocio.VIEWTRANSFORM_DIR_FROM_REFERENCE)
+    if isinstance(t, ocio.BuiltinTransform):
+        return t.getStyle()
+    raise ValueError(f"VT '{vt_name}' is not a BuiltinTransform")
+
+
+def _remove_cs_if_exists(config, name):
+    if config.getColorSpace(name):
+        config.removeColorSpace(name)
+
+
+def probe_acescct_display_range(config, vt_name, grid_res=65, margin=0.005):
+    """
+    Determine the actual ACEScct(display) range for a given View Transform.
+
+    Sweeps a dense 3D grid of ACEScct(scene) values through the full bake
+    chain (ACEScct decode → AP0 → VT fwd → XYZ→AP1 → ACEScct encode) and
+    returns (domain_min, domain_max) with a small safety margin so the LUT
+    fully covers the output range.
+
+    Uses the same grid resolution as the LUT (default 65) to capture the
+    exact range the Baker will produce.
+    """
+    builtin_style = _get_vt_builtin_style(config, vt_name)
+    untm_fwd_ops, untm_inv_ops = get_untm_ops(config)
+    log_dec, ap1_to_ap0 = get_acescct_decode_ops()
+    _, log_enc = get_acescct_encode_ops()
+
+    g = ocio.GroupTransform()
+    g.appendTransform(log_dec)
+    g.appendTransform(ap1_to_ap0)
+    g.appendTransform(ocio.BuiltinTransform(style=builtin_style))
+    for op in untm_inv_ops:
+        g.appendTransform(op)
+    g.appendTransform(ocio.MatrixTransform(matrix=ACESCT_M_AP0_AP1))
+    g.appendTransform(log_enc)
+
+    cpu = config.getProcessor(g).getDefaultCPUProcessor()
+
+    vals_1d = np.linspace(0.0, 1.0, grid_res, dtype=np.float32)
+    grid = np.array(
+        np.meshgrid(vals_1d, vals_1d, vals_1d), dtype=np.float32
+    ).T.reshape(-1, 3).copy()
+
+    cpu.apply(ocio.PackedImageDesc(grid.ravel(), len(grid), 1, 3))
+
+    raw_min = float(grid.min())
+    raw_max = float(grid.max())
+    span = raw_max - raw_min
+    domain_min = max(0.0, raw_min - span * margin)
+    domain_max = min(1.0, raw_max + span * margin)
+    return domain_min, domain_max
+
+
+def _make_domain_normalize(domain_min, domain_max):
+    """Affine MatrixTransform that maps [domain_min, domain_max] → [0, 1] (no clamp)."""
+    scale = 1.0 / (domain_max - domain_min)
+    offset = -domain_min * scale
+    return ocio.MatrixTransform(
+        matrix=[scale, 0, 0, 0, 0, scale, 0, 0, 0, 0, scale, 0, 0, 0, 0, 1],
+        offset=[offset, offset, offset, 0],
+    )
+
+
+def _make_domain_denormalize(domain_min, domain_max):
+    """Affine MatrixTransform that maps [0, 1] → [domain_min, domain_max] (no clamp)."""
+    scale = domain_max - domain_min
+    offset = domain_min
+    return ocio.MatrixTransform(
+        matrix=[scale, 0, 0, 0, 0, scale, 0, 0, 0, 0, scale, 0, 0, 0, 0, 1],
+        offset=[offset, offset, offset, 0],
+    )
+
+
+def bake_forward_cube_acescct(config, vt_name, cube_path, lut_size,
+                              domain_min=None, domain_max=None):
+    """
+    Bake forward .cube in ACEScct domain: ACEScct(scene) -> normalized ACEScct(display).
+
+    When domain_min/domain_max are provided, a Range operator remaps the
+    ACEScct(display) output from [domain_min, domain_max] to [0, 1] so the
+    full LUT grid covers only the useful range.
+
+    Creates a temp scene-referred CS whose from_reference is:
+      VT(fwd, AP0->XYZ) + XYZ->AP1 + ACEScct encode [+ Range normalize]
+    Baker: input=ACEScct, target=temp CS.
+    """
+    builtin_style = _get_vt_builtin_style(config, vt_name)
+    untm_fwd_ops, untm_inv_ops = get_untm_ops(config)
+    _, log_enc = get_acescct_encode_ops()
+
+    _remove_cs_if_exists(config, TEMP_ACESCCT_FWD_CS)
+    cs = ocio.ColorSpace(ocio.REFERENCE_SPACE_SCENE, TEMP_ACESCCT_FWD_CS)
+
+    g_from = ocio.GroupTransform()
+    g_from.appendTransform(ocio.BuiltinTransform(style=builtin_style))
+    for op in untm_inv_ops:
+        g_from.appendTransform(op)
+    g_from.appendTransform(ocio.MatrixTransform(matrix=ACESCT_M_AP0_AP1))
+    g_from.appendTransform(log_enc)
+    if domain_min is not None and domain_max is not None:
+        g_from.appendTransform(_make_domain_normalize(domain_min, domain_max))
+    cs.setTransform(g_from, ocio.COLORSPACE_DIR_FROM_REFERENCE)
+
+    g_to = ocio.GroupTransform()
+    if domain_min is not None and domain_max is not None:
+        g_to.appendTransform(_make_domain_denormalize(domain_min, domain_max))
+    log_dec, _ = get_acescct_decode_ops()
+    g_to.appendTransform(log_dec)
+    g_to.appendTransform(ocio.MatrixTransform(matrix=ACESCT_M_AP1_AP0))
+    for op in untm_fwd_ops:
+        g_to.appendTransform(op)
+    g_to.appendTransform(
+        ocio.BuiltinTransform(style=builtin_style,
+                              direction=ocio.TRANSFORM_DIR_INVERSE)
+    )
+    cs.setTransform(g_to, ocio.COLORSPACE_DIR_TO_REFERENCE)
+
+    config.addColorSpace(cs)
+
+    baker = ocio.Baker()
+    baker.setConfig(config)
+    baker.setFormat('iridas_cube')
+    baker.setCubeSize(lut_size)
+    baker.setInputSpace('ACEScct')
+    baker.setTargetSpace(TEMP_ACESCCT_FWD_CS)
+    baker.bake(cube_path)
+
+    config.removeColorSpace(TEMP_ACESCCT_FWD_CS)
+
+
+def bake_inverse_cube_acescct(config, vt_name, cube_path, lut_size,
+                              domain_min=None, domain_max=None):
+    """
+    Bake inverse .cube in ACEScct domain: normalized ACEScct(display) -> ACEScct(scene).
+
+    When domain_min/domain_max are provided, the temp CS includes a Range
+    that maps [0, 1] → [domain_min, domain_max] before the ACEScct decode,
+    so the Baker feeds the LUT with [0, 1] input covering the useful range.
+
+    Creates a temp scene-referred CS whose to_reference is:
+      [Range denormalize +] ACEScct decode + AP1->AP0 + untm_fwd + VT(inv)
+    Baker: input=temp CS, target=ACEScct.
+    """
+    builtin_style = _get_vt_builtin_style(config, vt_name)
+    untm_fwd_ops, untm_inv_ops = get_untm_ops(config)
+    _, log_enc = get_acescct_encode_ops()
+
+    _remove_cs_if_exists(config, TEMP_ACESCCT_INV_CS)
+    cs = ocio.ColorSpace(ocio.REFERENCE_SPACE_SCENE, TEMP_ACESCCT_INV_CS)
+
+    g_to = ocio.GroupTransform()
+    if domain_min is not None and domain_max is not None:
+        g_to.appendTransform(_make_domain_denormalize(domain_min, domain_max))
+    log_dec, _ = get_acescct_decode_ops()
+    g_to.appendTransform(log_dec)
+    g_to.appendTransform(ocio.MatrixTransform(matrix=ACESCT_M_AP1_AP0))
+    for op in untm_fwd_ops:
+        g_to.appendTransform(op)
+    g_to.appendTransform(
+        ocio.BuiltinTransform(style=builtin_style,
+                              direction=ocio.TRANSFORM_DIR_INVERSE)
+    )
+    cs.setTransform(g_to, ocio.COLORSPACE_DIR_TO_REFERENCE)
+
+    g_from = ocio.GroupTransform()
+    g_from.appendTransform(
+        ocio.BuiltinTransform(style=builtin_style,
+                              direction=ocio.TRANSFORM_DIR_FORWARD)
+    )
+    for op in untm_inv_ops:
+        g_from.appendTransform(op)
+    g_from.appendTransform(ocio.MatrixTransform(matrix=ACESCT_M_AP0_AP1))
+    g_from.appendTransform(log_enc)
+    if domain_min is not None and domain_max is not None:
+        g_from.appendTransform(_make_domain_normalize(domain_min, domain_max))
+    cs.setTransform(g_from, ocio.COLORSPACE_DIR_FROM_REFERENCE)
+
+    config.addColorSpace(cs)
+
+    baker = ocio.Baker()
+    baker.setConfig(config)
+    baker.setFormat('iridas_cube')
+    baker.setCubeSize(lut_size)
+    baker.setInputSpace(TEMP_ACESCCT_INV_CS)
+    baker.setTargetSpace('ACEScct')
+    baker.bake(cube_path)
+
+    config.removeColorSpace(TEMP_ACESCCT_INV_CS)
+
+
+def build_forward_clf_acescct(config, cube_path, clf_path,
+                              domain_min=None, domain_max=None):
+    """
+    Build forward CLF (ACEScct-domain):
+      AP0->AP1 + ACEScct encode [+ normalize] + LUT3D [+ denormalize] + ACEScct decode + AP1->XYZ-D65.
+    Input: ACES2065-1.  Output: CIE-XYZ-D65.
+
+    When domain_min/domain_max are provided, affine normalize/denormalize
+    operators bracket the LUT3D so it operates over the full [0,1] grid.
+    """
+    untm_fwd_ops, _ = get_untm_ops(config)
+    ap0_to_ap1, log_enc = get_acescct_encode_ops()
+    log_dec, ap1_to_ap0 = get_acescct_decode_ops()
+
+    ft = ocio.FileTransform(src=os.path.abspath(cube_path),
+                            interpolation=ocio.INTERP_BEST)
+    proc_lut = config.getProcessor(ft)
+    gt_lut = proc_lut.createGroupTransform()
+
+    combined = ocio.GroupTransform()
+    combined.appendTransform(ap0_to_ap1)
+    combined.appendTransform(log_enc)
+    for i in range(len(gt_lut)):
+        combined.appendTransform(gt_lut[i])
+    if domain_min is not None and domain_max is not None:
+        combined.appendTransform(_make_domain_denormalize(domain_min, domain_max))
+    combined.appendTransform(log_dec)
+    combined.appendTransform(ocio.MatrixTransform(matrix=ACESCT_M_AP1_AP0))
+    for op in untm_fwd_ops:
+        combined.appendTransform(op)
+
+    combined.write(
+        formatName='Academy/ASC Common LUT Format',
+        config=config,
+        fileName=clf_path,
+    )
+    return len(combined)
+
+
+def build_inverse_clf_acescct(config, cube_path, clf_path,
+                              domain_min=None, domain_max=None):
+    """
+    Build inverse CLF (ACEScct-domain):
+      XYZ-D65->AP1 + ACEScct encode [+ normalize] + LUT3D [+ denormalize] + ACEScct decode + AP1->AP0.
+    Input: CIE-XYZ-D65.  Output: ACES2065-1.
+
+    When domain_min/domain_max are provided, affine normalize/denormalize
+    operators bracket the LUT3D so it operates over the full [0,1] grid.
+    """
+    _, untm_inv_ops = get_untm_ops(config)
+    _, log_enc = get_acescct_encode_ops()
+    log_dec, _ = get_acescct_decode_ops()
+
+    ft = ocio.FileTransform(src=os.path.abspath(cube_path),
+                            interpolation=ocio.INTERP_BEST)
+    proc_lut = config.getProcessor(ft)
+    gt_lut = proc_lut.createGroupTransform()
+
+    combined = ocio.GroupTransform()
+    for op in untm_inv_ops:
+        combined.appendTransform(op)
+    combined.appendTransform(ocio.MatrixTransform(matrix=ACESCT_M_AP0_AP1))
+    combined.appendTransform(log_enc)
+    if domain_min is not None and domain_max is not None:
+        combined.appendTransform(_make_domain_normalize(domain_min, domain_max))
+    for i in range(len(gt_lut)):
+        combined.appendTransform(gt_lut[i])
+    combined.appendTransform(log_dec)
+    combined.appendTransform(ocio.MatrixTransform(matrix=ACESCT_M_AP1_AP0))
+
+    combined.write(
+        formatName='Academy/ASC Common LUT Format',
+        config=config,
+        fileName=clf_path,
+    )
+    return len(combined)
+
+
+FWD_OP_DESCRIPTIONS_ACESCCT = [
+    "ACES AP0 to AP1 matrix",
+    "Linear to ACEScct log (encode for LUT input)",
+    "3D LUT - ACEScct(scene) to normalized ACEScct(display)",
+    "Denormalize [0,1] to ACEScct(display) domain",
+    "ACEScct log to linear (decode LUT output)",
+    "ACES AP1 to AP0 matrix",
+    "AP0 to CIE-XYZ-D65 (Un-tone-mapped forward)",
+]
+
+INV_OP_DESCRIPTIONS_ACESCCT = [
+    "CIE-XYZ-D65 to AP0 (Un-tone-mapped inverse)",
+    "ACES AP0 to AP1 matrix",
+    "Linear to ACEScct log (encode for LUT input)",
+    "Normalize ACEScct(display) domain to [0,1]",
+    "3D LUT - normalized ACEScct(display) to ACEScct(scene)",
+    "ACEScct log to linear (decode LUT output)",
+    "ACES AP1 to AP0 matrix",
+]
+
+
+def generate_clf_files_acescct(
+    config,
+    vt_list,
+    lut_dir,
+    lut_size_fwd,
+    lut_size_inv,
+):
+    """
+    Symmetric ACEScct-domain CLF generation with per-VT domain normalization.
+
+    Both forward and inverse 3D LUTs operate in normalized ACEScct space.
+    A probe determines the actual ACEScct(display) range for each VT, and
+    affine normalize/denormalize operators bracket the LUT3D so the full
+    [0,1] grid covers only the useful range.
+
+    Returns a dict mapping BuiltIn style -> {"forward": filename, "inverse": filename}.
+    """
+    os.makedirs(lut_dir, exist_ok=True)
+
+    vt_to_clf = {}
+
+    for vt_name, builtin_style in vt_list:
+        base = sanitize_lut_filename(vt_name)
+        fwd_clf = f"{base}.clf"
+        inv_clf = f"{base}_inv.clf"
+        fwd_path = os.path.join(lut_dir, fwd_clf)
+        inv_path = os.path.join(lut_dir, inv_clf)
+
+        fwd_cube = os.path.join(lut_dir, f"_tmp_{base}_fwd.cube")
+        inv_cube = os.path.join(lut_dir, f"_tmp_{base}_inv.cube")
+
+        domain_min, domain_max = probe_acescct_display_range(
+            config, vt_name, grid_res=max(lut_size_fwd, lut_size_inv),
+        )
+
+        bake_forward_cube_acescct(
+            config, vt_name, fwd_cube, lut_size_fwd,
+            domain_min=domain_min, domain_max=domain_max,
+        )
+        bake_inverse_cube_acescct(
+            config, vt_name, inv_cube, lut_size_inv,
+            domain_min=domain_min, domain_max=domain_max,
+        )
+
+        n_fwd = build_forward_clf_acescct(
+            config, fwd_cube, fwd_path,
+            domain_min=domain_min, domain_max=domain_max,
+        )
+        n_inv = build_inverse_clf_acescct(
+            config, inv_cube, inv_path,
+            domain_min=domain_min, domain_max=domain_max,
+        )
+
+        os.remove(fwd_cube)
+        os.remove(inv_cube)
+
+        postprocess_clf(
+            fwd_path,
+            name=f"{vt_name} - Forward",
+            clf_id=f"urn:aswf:ocio:transformId:{base}:fwd",
+            input_desc='ACES2065-1',
+            output_desc='CIE-XYZ-D65',
+            op_descriptions=FWD_OP_DESCRIPTIONS_ACESCCT,
+        )
+        postprocess_clf(
+            inv_path,
+            name=f"{vt_name} - Inverse",
+            clf_id=f"urn:aswf:ocio:transformId:{base}:inv",
+            input_desc='CIE-XYZ-D65',
+            output_desc='ACES2065-1',
+            op_descriptions=INV_OP_DESCRIPTIONS_ACESCCT,
+        )
+
+        fwd_size = os.path.getsize(fwd_path)
+        inv_size = os.path.getsize(inv_path)
+        print(f"    {vt_name}  [domain: {domain_min:.4f} .. {domain_max:.4f}]")
+        print(f"      Forward: {fwd_clf} ({fwd_size / 1024:.0f} KB, {n_fwd} ops)")
+        print(f"      Inverse: {inv_clf} ({inv_size / 1024:.0f} KB, {n_inv} ops)")
+
+        vt_to_clf[builtin_style] = {
+            "forward": fwd_clf,
+            "inverse": inv_clf,
+        }
+
+    return vt_to_clf
+
+
+# ---------------------------------------------------------------------------
+# Display-shaper CLF pipeline
+#
+# Uses the display's native encoding as the LUT domain shaper:
+#   SDR views  -> gamma 2.2 at AP1 primaries
+#   HDR views  -> PQ (ST 2084) at AP1 primaries
+#
+# The 3D LUT maps display-encoded AP1 <-> ACEScct, so the [0,1] LUT domain
+# naturally covers the full displayable range without range normalization.
+# ---------------------------------------------------------------------------
+
+GAMMA22_EXPONENT = 2.2
+
+
+def _is_hdr_view(vt_name):
+    """Classify a VT as HDR (True) or SDR (False) based on its name."""
+    if 'SDR' in vt_name:
+        return False
+    if 'HDR' in vt_name:
+        nits = 0
+        import re as _re
+        m = _re.search(r'(\d+)\s*nits', vt_name)
+        if m:
+            nits = int(m.group(1))
+        return nits > 108
+    return False
+
+
+def _get_display_shaper_label(vt_name):
+    """Return a human-readable label for the shaper used by this VT."""
+    return "PQ (ST 2084)" if _is_hdr_view(vt_name) else "Gamma 2.2"
+
+
+def get_gamma22_encode_op():
+    """Linear AP1 -> Gamma 2.2 encoded AP1: x^(1/2.2), negatives clamped to 0."""
+    return ocio.ExponentTransform(
+        value=[GAMMA22_EXPONENT, GAMMA22_EXPONENT, GAMMA22_EXPONENT, 1.0],
+        negativeStyle=ocio.NEGATIVE_CLAMP,
+        direction=ocio.TRANSFORM_DIR_INVERSE,
+    )
+
+
+def get_gamma22_decode_op():
+    """Gamma 2.2 encoded AP1 -> Linear AP1: x^2.2, negatives clamped to 0."""
+    return ocio.ExponentTransform(
+        value=[GAMMA22_EXPONENT, GAMMA22_EXPONENT, GAMMA22_EXPONENT, 1.0],
+        negativeStyle=ocio.NEGATIVE_CLAMP,
+        direction=ocio.TRANSFORM_DIR_FORWARD,
+    )
+
+
+def get_pq_encode_op():
+    """Linear AP1 (normalised to 10000 nits) -> PQ [0,1].
+
+    Uses the OCIO BuiltinTransform which resolves to a half-domain LUT1D.
+    """
+    return ocio.BuiltinTransform(
+        style="CURVE - LINEAR_to_ST-2084",
+        direction=ocio.TRANSFORM_DIR_FORWARD,
+    )
+
+
+def _resolve_pq_decode_for_clf():
+    """PQ [0,1] -> Linear: resolved forward LUT1D (CLF-writable).
+
+    The BuiltinTransform inverse is an InverseLUT1D which CLF cannot represent.
+    We resolve it through OPTIMIZATION_DEFAULT to get a forward LUT1D.
+    """
+    bake_cfg = ocio.Config.CreateFromBuiltinConfig(BUILTIN_BAKE_CONFIG)
+    pq_enc = ocio.BuiltinTransform(style="CURVE - LINEAR_to_ST-2084")
+    proc = bake_cfg.getProcessor(pq_enc, ocio.TRANSFORM_DIR_INVERSE)
+    proc_opt = proc.getOptimizedProcessor(ocio.OPTIMIZATION_DEFAULT)
+    gt = proc_opt.createGroupTransform()
+    return [gt[i] for i in range(len(gt))]
+
+
+def get_pq_decode_op():
+    """PQ [0,1] -> Linear AP1 (normalised to 10000 nits).
+
+    For baking (processed by OCIO runtime), uses the BuiltinTransform inverse.
+    """
+    return ocio.BuiltinTransform(
+        style="CURVE - LINEAR_to_ST-2084",
+        direction=ocio.TRANSFORM_DIR_INVERSE,
+    )
+
+
+def _get_shaper_encode_decode(vt_name):
+    """Return (encode_op, decode_op) for the appropriate display shaper."""
+    if _is_hdr_view(vt_name):
+        return get_pq_encode_op(), get_pq_decode_op()
+    return get_gamma22_encode_op(), get_gamma22_decode_op()
+
+
+def probe_display_shaper_range(config, vt_name, grid_res=65, margin=0.005):
+    """
+    Determine the display-shaper output range for a given View Transform.
+
+    Sweeps a dense 3D grid of ACEScct(scene) values through:
+      ACEScct decode → AP0 → VT fwd → XYZ→AP1 → display encode (gamma/PQ)
+    and returns (domain_min, domain_max) with a small safety margin.
+    """
+    builtin_style = _get_vt_builtin_style(config, vt_name)
+    _, untm_inv_ops = get_untm_ops(config)
+    log_dec, ap1_to_ap0 = get_acescct_decode_ops()
+    shaper_enc, _ = _get_shaper_encode_decode(vt_name)
+
+    g = ocio.GroupTransform()
+    g.appendTransform(log_dec)
+    g.appendTransform(ap1_to_ap0)
+    g.appendTransform(ocio.BuiltinTransform(style=builtin_style))
+    for op in untm_inv_ops:
+        g.appendTransform(op)
+    g.appendTransform(ocio.MatrixTransform(matrix=ACESCT_M_AP0_AP1))
+    g.appendTransform(shaper_enc)
+
+    cpu = config.getProcessor(g).getDefaultCPUProcessor()
+
+    vals_1d = np.linspace(0.0, 1.0, grid_res, dtype=np.float32)
+    grid = np.array(
+        np.meshgrid(vals_1d, vals_1d, vals_1d), dtype=np.float32
+    ).T.reshape(-1, 3).copy()
+
+    cpu.apply(ocio.PackedImageDesc(grid.ravel(), len(grid), 1, 3))
+
+    raw_min = float(grid.min())
+    raw_max = float(grid.max())
+    span = raw_max - raw_min
+    domain_min = max(0.0, raw_min - span * margin)
+    domain_max = min(1.0, raw_max + span * margin)
+    return domain_min, domain_max
+
+
+def bake_forward_cube_display_shaper(config, vt_name, cube_path, lut_size,
+                                     domain_min=None, domain_max=None):
+    """
+    Bake forward .cube: ACEScct(scene) -> normalized display-encoded AP1.
+
+    When domain_min/domain_max are provided, a normalize operator remaps the
+    display-shaper output from [domain_min, domain_max] to [0, 1].
+
+    Baker: input=ACEScct, target=temp CS.
+    """
+    builtin_style = _get_vt_builtin_style(config, vt_name)
+    untm_fwd_ops, untm_inv_ops = get_untm_ops(config)
+    shaper_enc, _ = _get_shaper_encode_decode(vt_name)
+
+    _remove_cs_if_exists(config, TEMP_DISPSHAPER_FWD_CS)
+    cs = ocio.ColorSpace(ocio.REFERENCE_SPACE_SCENE, TEMP_DISPSHAPER_FWD_CS)
+
+    g_from = ocio.GroupTransform()
+    g_from.appendTransform(ocio.BuiltinTransform(style=builtin_style))
+    for op in untm_inv_ops:
+        g_from.appendTransform(op)
+    g_from.appendTransform(ocio.MatrixTransform(matrix=ACESCT_M_AP0_AP1))
+    g_from.appendTransform(shaper_enc)
+    if domain_min is not None and domain_max is not None:
+        g_from.appendTransform(_make_domain_normalize(domain_min, domain_max))
+    cs.setTransform(g_from, ocio.COLORSPACE_DIR_FROM_REFERENCE)
+
+    _, shaper_dec = _get_shaper_encode_decode(vt_name)
+    g_to = ocio.GroupTransform()
+    if domain_min is not None and domain_max is not None:
+        g_to.appendTransform(_make_domain_denormalize(domain_min, domain_max))
+    g_to.appendTransform(shaper_dec)
+    g_to.appendTransform(ocio.MatrixTransform(matrix=ACESCT_M_AP1_AP0))
+    for op in untm_fwd_ops:
+        g_to.appendTransform(op)
+    g_to.appendTransform(
+        ocio.BuiltinTransform(style=builtin_style,
+                              direction=ocio.TRANSFORM_DIR_INVERSE)
+    )
+    cs.setTransform(g_to, ocio.COLORSPACE_DIR_TO_REFERENCE)
+
+    config.addColorSpace(cs)
+
+    baker = ocio.Baker()
+    baker.setConfig(config)
+    baker.setFormat('iridas_cube')
+    baker.setCubeSize(lut_size)
+    baker.setInputSpace('ACEScct')
+    baker.setTargetSpace(TEMP_DISPSHAPER_FWD_CS)
+    baker.bake(cube_path)
+
+    config.removeColorSpace(TEMP_DISPSHAPER_FWD_CS)
+
+
+def bake_inverse_cube_display_shaper(config, vt_name, cube_path, lut_size,
+                                     domain_min=None, domain_max=None):
+    """
+    Bake inverse .cube: normalized display-encoded AP1 -> ACEScct(scene).
+
+    When domain_min/domain_max are provided, a denormalize operator remaps
+    [0, 1] → [domain_min, domain_max] before the display decode.
+
+    Baker: input=temp CS, target=ACEScct.
+    """
+    builtin_style = _get_vt_builtin_style(config, vt_name)
+    untm_fwd_ops, untm_inv_ops = get_untm_ops(config)
+    _, shaper_dec = _get_shaper_encode_decode(vt_name)
+
+    _remove_cs_if_exists(config, TEMP_DISPSHAPER_INV_CS)
+    cs = ocio.ColorSpace(ocio.REFERENCE_SPACE_SCENE, TEMP_DISPSHAPER_INV_CS)
+
+    g_to = ocio.GroupTransform()
+    if domain_min is not None and domain_max is not None:
+        g_to.appendTransform(_make_domain_denormalize(domain_min, domain_max))
+    g_to.appendTransform(shaper_dec)
+    g_to.appendTransform(ocio.MatrixTransform(matrix=ACESCT_M_AP1_AP0))
+    for op in untm_fwd_ops:
+        g_to.appendTransform(op)
+    g_to.appendTransform(
+        ocio.BuiltinTransform(style=builtin_style,
+                              direction=ocio.TRANSFORM_DIR_INVERSE)
+    )
+    cs.setTransform(g_to, ocio.COLORSPACE_DIR_TO_REFERENCE)
+
+    shaper_enc, _ = _get_shaper_encode_decode(vt_name)
+    g_from = ocio.GroupTransform()
+    g_from.appendTransform(
+        ocio.BuiltinTransform(style=builtin_style,
+                              direction=ocio.TRANSFORM_DIR_FORWARD)
+    )
+    for op in untm_inv_ops:
+        g_from.appendTransform(op)
+    g_from.appendTransform(ocio.MatrixTransform(matrix=ACESCT_M_AP0_AP1))
+    g_from.appendTransform(shaper_enc)
+    if domain_min is not None and domain_max is not None:
+        g_from.appendTransform(_make_domain_normalize(domain_min, domain_max))
+    cs.setTransform(g_from, ocio.COLORSPACE_DIR_FROM_REFERENCE)
+
+    config.addColorSpace(cs)
+
+    baker = ocio.Baker()
+    baker.setConfig(config)
+    baker.setFormat('iridas_cube')
+    baker.setCubeSize(lut_size)
+    baker.setInputSpace(TEMP_DISPSHAPER_INV_CS)
+    baker.setTargetSpace('ACEScct')
+    baker.bake(cube_path)
+
+    config.removeColorSpace(TEMP_DISPSHAPER_INV_CS)
+
+
+def _get_shaper_clf_ops(vt_name):
+    """Return (encode_ops, decode_ops) suitable for CLF writing.
+
+    For gamma 2.2: single ExponentTransform in each direction.
+    For PQ: encode is the BuiltinTransform (forward LUT1D), decode is resolved
+    via _resolve_pq_decode_for_clf() to avoid InverseLUT1D.
+    """
+    if _is_hdr_view(vt_name):
+        enc_ops = [get_pq_encode_op()]
+        dec_ops = _resolve_pq_decode_for_clf()
+        return enc_ops, dec_ops
+    return [get_gamma22_encode_op()], [get_gamma22_decode_op()]
+
+
+def build_forward_clf_display_shaper(config, cube_path, clf_path, vt_name,
+                                     domain_min=None, domain_max=None):
+    """
+    Build forward CLF (display-shaper domain):
+      AP0->AP1 + ACEScct encode + LUT3D (ACEScct -> norm display AP1)
+      [+ denormalize] + display decode (gamma/PQ) + AP1->XYZ-D65.
+    Input: ACES2065-1.  Output: CIE-XYZ-D65.
+    """
+    untm_fwd_ops, _ = get_untm_ops(config)
+    ap0_to_ap1, log_enc = get_acescct_encode_ops()
+    _, shaper_dec_ops = _get_shaper_clf_ops(vt_name)
+
+    ft = ocio.FileTransform(src=os.path.abspath(cube_path),
+                            interpolation=ocio.INTERP_BEST)
+    proc_lut = config.getProcessor(ft)
+    gt_lut = proc_lut.createGroupTransform()
+
+    combined = ocio.GroupTransform()
+    combined.appendTransform(ap0_to_ap1)
+    combined.appendTransform(log_enc)
+    for i in range(len(gt_lut)):
+        combined.appendTransform(gt_lut[i])
+    if domain_min is not None and domain_max is not None:
+        combined.appendTransform(_make_domain_denormalize(domain_min, domain_max))
+    for op in shaper_dec_ops:
+        combined.appendTransform(op)
+    combined.appendTransform(ocio.MatrixTransform(matrix=ACESCT_M_AP1_AP0))
+    for op in untm_fwd_ops:
+        combined.appendTransform(op)
+
+    combined.write(
+        formatName='Academy/ASC Common LUT Format',
+        config=config,
+        fileName=clf_path,
+    )
+    return len(combined)
+
+
+def build_inverse_clf_display_shaper(config, cube_path, clf_path, vt_name,
+                                     domain_min=None, domain_max=None):
+    """
+    Build inverse CLF (display-shaper domain):
+      XYZ-D65->AP1 + display encode (gamma/PQ) [+ normalize]
+      + LUT3D (norm display AP1 -> ACEScct) + ACEScct decode + AP1->AP0.
+    Input: CIE-XYZ-D65.  Output: ACES2065-1.
+    """
+    _, untm_inv_ops = get_untm_ops(config)
+    log_dec, _ = get_acescct_decode_ops()
+    shaper_enc_ops, _ = _get_shaper_clf_ops(vt_name)
+
+    ft = ocio.FileTransform(src=os.path.abspath(cube_path),
+                            interpolation=ocio.INTERP_BEST)
+    proc_lut = config.getProcessor(ft)
+    gt_lut = proc_lut.createGroupTransform()
+
+    combined = ocio.GroupTransform()
+    for op in untm_inv_ops:
+        combined.appendTransform(op)
+    combined.appendTransform(ocio.MatrixTransform(matrix=ACESCT_M_AP0_AP1))
+    for op in shaper_enc_ops:
+        combined.appendTransform(op)
+    if domain_min is not None and domain_max is not None:
+        combined.appendTransform(_make_domain_normalize(domain_min, domain_max))
+    for i in range(len(gt_lut)):
+        combined.appendTransform(gt_lut[i])
+    combined.appendTransform(log_dec)
+    combined.appendTransform(ocio.MatrixTransform(matrix=ACESCT_M_AP1_AP0))
+
+    combined.write(
+        formatName='Academy/ASC Common LUT Format',
+        config=config,
+        fileName=clf_path,
+    )
+    return len(combined)
+
+
+FWD_OP_DESCRIPTIONS_DISPSHAPER = [
+    "ACES AP0 to AP1 matrix",
+    "Linear to ACEScct log (encode for LUT input)",
+    "3D LUT - ACEScct(scene) to normalized display-encoded AP1",
+    "Denormalize [0,1] to display-shaper domain",
+    "Display decode (gamma 2.2 or PQ) to linear AP1",
+    "ACES AP1 to AP0 matrix",
+    "AP0 to CIE-XYZ-D65 (Un-tone-mapped forward)",
+]
+
+INV_OP_DESCRIPTIONS_DISPSHAPER = [
+    "CIE-XYZ-D65 to AP0 (Un-tone-mapped inverse)",
+    "ACES AP0 to AP1 matrix",
+    "Display encode (gamma 2.2 or PQ) from linear AP1",
+    "Normalize display-shaper domain to [0,1]",
+    "3D LUT - normalized display-encoded AP1 to ACEScct(scene)",
+    "ACEScct log to linear (decode LUT output)",
+    "ACES AP1 to AP0 matrix",
+]
+
+
+def generate_clf_files_display_shaper(
+    config,
+    vt_list,
+    lut_dir,
+    lut_size_fwd,
+    lut_size_inv,
+):
+    """
+    Display-shaper CLF generation with per-VT domain normalization.
+
+    Uses gamma 2.2 (SDR) or PQ (HDR) at AP1 primaries as the LUT domain
+    shaper, then normalizes the effective range to [0,1] so the full LUT
+    grid covers only the useful range.
+
+    Returns a dict mapping BuiltIn style -> {"forward": filename, "inverse": filename}.
+    """
+    os.makedirs(lut_dir, exist_ok=True)
+
+    vt_to_clf = {}
+
+    for vt_name, builtin_style in vt_list:
+        base = sanitize_lut_filename(vt_name)
+        fwd_clf = f"{base}.clf"
+        inv_clf = f"{base}_inv.clf"
+        fwd_path = os.path.join(lut_dir, fwd_clf)
+        inv_path = os.path.join(lut_dir, inv_clf)
+
+        fwd_cube = os.path.join(lut_dir, f"_tmp_{base}_dshaper_fwd.cube")
+        inv_cube = os.path.join(lut_dir, f"_tmp_{base}_dshaper_inv.cube")
+
+        shaper_label = _get_display_shaper_label(vt_name)
+
+        domain_min, domain_max = probe_display_shaper_range(
+            config, vt_name, grid_res=max(lut_size_fwd, lut_size_inv),
+        )
+
+        bake_forward_cube_display_shaper(
+            config, vt_name, fwd_cube, lut_size_fwd,
+            domain_min=domain_min, domain_max=domain_max,
+        )
+        bake_inverse_cube_display_shaper(
+            config, vt_name, inv_cube, lut_size_inv,
+            domain_min=domain_min, domain_max=domain_max,
+        )
+
+        n_fwd = build_forward_clf_display_shaper(
+            config, fwd_cube, fwd_path, vt_name,
+            domain_min=domain_min, domain_max=domain_max,
+        )
+        n_inv = build_inverse_clf_display_shaper(
+            config, inv_cube, inv_path, vt_name,
+            domain_min=domain_min, domain_max=domain_max,
+        )
+
+        os.remove(fwd_cube)
+        os.remove(inv_cube)
+
+        postprocess_clf(
+            fwd_path,
+            name=f"{vt_name} - Forward",
+            clf_id=f"urn:aswf:ocio:transformId:{base}:fwd",
+            input_desc='ACES2065-1',
+            output_desc='CIE-XYZ-D65',
+            op_descriptions=FWD_OP_DESCRIPTIONS_DISPSHAPER,
+        )
+        postprocess_clf(
+            inv_path,
+            name=f"{vt_name} - Inverse",
+            clf_id=f"urn:aswf:ocio:transformId:{base}:inv",
+            input_desc='CIE-XYZ-D65',
+            output_desc='ACES2065-1',
+            op_descriptions=INV_OP_DESCRIPTIONS_DISPSHAPER,
+        )
+
+        fwd_size = os.path.getsize(fwd_path)
+        inv_size = os.path.getsize(inv_path)
+        print(f"    {vt_name}  [shaper: {shaper_label}, domain: {domain_min:.4f} .. {domain_max:.4f}]")
+        print(f"      Forward: {fwd_clf} ({fwd_size / 1024:.0f} KB, {n_fwd} ops)")
+        print(f"      Inverse: {inv_clf} ({inv_size / 1024:.0f} KB, {n_inv} ops)")
+
+        vt_to_clf[builtin_style] = {
+            "forward": fwd_clf,
+            "inverse": inv_clf,
+        }
+
+    return vt_to_clf
+
+
 def generate_clf_files(
     config,
     vt_list,
@@ -1990,9 +2822,13 @@ def main():
                         help="3D LUT cube size for inverse CLFs (default: 97)")
     parser.add_argument(
         "--inv-encoding",
-        choices=("acescc", "acescct", "extended-log", "camera-log", "jplog2"),
-        default="acescct",
-        help="Inverse: acescct (default, ACEScct LogCamera shaper, matches fwd), acescc (pure log shaper), extended-log, camera-log, jplog2",
+        choices=("display-shaper", "acescct-domain", "acescc", "acescct", "extended-log", "camera-log", "jplog2"),
+        default="display-shaper",
+        help="Inverse encoding: display-shaper (default, gamma 2.2 for SDR / PQ for HDR "
+        "at AP1 primaries — best perceptual distribution), "
+        "acescct-domain (symmetric ACEScct-in/ACEScct-out LUT with per-VT range normalization), "
+        "acescct (ACEScct LogCamera shaper), "
+        "acescc (pure log shaper), extended-log, camera-log, jplog2",
     )
     parser.add_argument(
         "--inv-log-lin-min",
@@ -2085,13 +2921,22 @@ def main():
             file=sys.stderr,
         )
         sys.exit(1)
+    if args.inv_encoding == "acescct-domain" and args.inv_shaper_gamma != INV_SHAPER_GAMMA:
+        print(
+            "Note: --inv-shaper-gamma is ignored for acescct-domain mode (no shaper needed)",
+            file=sys.stderr,
+        )
 
     print(f"Reference config: {args.reference_config}")
     print(f"Output directory: {args.output_dir}")
     print(f"Forward LUT size: {args.lut_size}^3")
     print(f"Inverse LUT size: {args.inv_lut_size}^3")
     print(f"Inverse encoding: {args.inv_encoding}")
-    if args.inv_encoding == "extended-log":
+    if args.inv_encoding == "acescct-domain":
+        print("  Symmetric ACEScct-in/ACEScct-out with per-VT range normalization")
+    elif args.inv_encoding == "display-shaper":
+        print("  Display-shaper: gamma 2.2 (SDR) / PQ (HDR) at AP1 primaries")
+    elif args.inv_encoding == "extended-log":
         print(
             f"  Extended-log AP1 linear range: [{args.inv_log_lin_min}, {args.inv_log_lin_max}]"
         )
@@ -2107,12 +2952,13 @@ def main():
         print(
             f"  Pseudo-log AP1 linear range: [{args.pseudolog_lin_min}, {args.pseudolog_lin_max}]"
         )
-    if args.inv_remap != "range":
-        print(f"  Inverse remap mode: {args.inv_remap}")
-    if args.inv_shaper_gamma != INV_SHAPER_GAMMA:
-        print(f"  Inverse shaper gamma: {args.inv_shaper_gamma}")
-    elif args.inv_shaper_gamma <= 1.0:
-        print("  Inverse shaper: DISABLED (classic mode)")
+    if args.inv_encoding not in ("acescct-domain", "display-shaper"):
+        if args.inv_remap != "range":
+            print(f"  Inverse remap mode: {args.inv_remap}")
+        if args.inv_shaper_gamma != INV_SHAPER_GAMMA:
+            print(f"  Inverse shaper gamma: {args.inv_shaper_gamma}")
+        elif args.inv_shaper_gamma <= 1.0:
+            print("  Inverse shaper: DISABLED (classic mode)")
     print()
 
     print("Loading template config (for VT discovery + output structure)...")
@@ -2140,6 +2986,8 @@ def main():
     os.makedirs(lut_dir, exist_ok=True)
 
     inv_labels = {
+        "acescct-domain": "ACEScct symmetric (ACEScct-in/ACEScct-out, ranged)",
+        "display-shaper": "display-shaper (gamma 2.2 SDR / PQ HDR)",
         "acescc": "ACEScc",
         "acescct": "ACEScct (LogCamera shaper)",
         "extended-log": "extended log (native Log)",
@@ -2148,33 +2996,51 @@ def main():
     }
     inv_label = inv_labels.get(args.inv_encoding, args.inv_encoding)
     print(f"Generating CLF files (fwd: ACEScct, inv: {inv_label})...")
-    pl_params = None
-    if args.inv_encoding == "jplog2":
-        pl_params = PseudoLogParams()
-        if args.pseudolog_lin_break is not None:
-            pl_params = replace(pl_params, lin_break=args.pseudolog_lin_break)
-        if args.pseudolog_log_divisor is not None:
-            pl_params = replace(pl_params, log_divisor=args.pseudolog_log_divisor)
-        if args.pseudolog_log_offset is not None:
-            pl_params = replace(pl_params, log_offset=args.pseudolog_log_offset)
-    vt_to_clf = generate_clf_files(
-        bake_cfg,
-        vt_list,
-        lut_dir,
-        args.lut_size,
-        args.inv_lut_size,
-        inv_encoding=args.inv_encoding,
-        pseudolog_params=pl_params if args.inv_encoding == "jplog2" else None,
-        pseudolog_lin_min=args.pseudolog_lin_min,
-        pseudolog_lin_max=args.pseudolog_lin_max,
-        inv_log_lin_min=args.inv_log_lin_min,
-        inv_log_lin_max=args.inv_log_lin_max,
-        inv_camera_log_lin_break=args.inv_camera_log_lin_break,
-        inv_acescct_gray_min=args.inv_acescct_gray_min,
-        inv_acescct_gray_max=args.inv_acescct_gray_max,
-        inv_remap_mode=args.inv_remap,
-        inv_shaper_gamma=args.inv_shaper_gamma,
-    )
+
+    if args.inv_encoding == "acescct-domain":
+        vt_to_clf = generate_clf_files_acescct(
+            bake_cfg,
+            vt_list,
+            lut_dir,
+            args.lut_size,
+            args.inv_lut_size,
+        )
+    elif args.inv_encoding == "display-shaper":
+        vt_to_clf = generate_clf_files_display_shaper(
+            bake_cfg,
+            vt_list,
+            lut_dir,
+            args.lut_size,
+            args.inv_lut_size,
+        )
+    else:
+        pl_params = None
+        if args.inv_encoding == "jplog2":
+            pl_params = PseudoLogParams()
+            if args.pseudolog_lin_break is not None:
+                pl_params = replace(pl_params, lin_break=args.pseudolog_lin_break)
+            if args.pseudolog_log_divisor is not None:
+                pl_params = replace(pl_params, log_divisor=args.pseudolog_log_divisor)
+            if args.pseudolog_log_offset is not None:
+                pl_params = replace(pl_params, log_offset=args.pseudolog_log_offset)
+        vt_to_clf = generate_clf_files(
+            bake_cfg,
+            vt_list,
+            lut_dir,
+            args.lut_size,
+            args.inv_lut_size,
+            inv_encoding=args.inv_encoding,
+            pseudolog_params=pl_params if args.inv_encoding == "jplog2" else None,
+            pseudolog_lin_min=args.pseudolog_lin_min,
+            pseudolog_lin_max=args.pseudolog_lin_max,
+            inv_log_lin_min=args.inv_log_lin_min,
+            inv_log_lin_max=args.inv_log_lin_max,
+            inv_camera_log_lin_break=args.inv_camera_log_lin_break,
+            inv_acescct_gray_min=args.inv_acescct_gray_min,
+            inv_acescct_gray_max=args.inv_acescct_gray_max,
+            inv_remap_mode=args.inv_remap,
+            inv_shaper_gamma=args.inv_shaper_gamma,
+        )
     print(f"\n  Total: {len(vt_to_clf)} view transforms -> {len(vt_to_clf) * 2} CLF files")
     print()
 
