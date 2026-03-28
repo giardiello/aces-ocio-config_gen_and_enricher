@@ -2,15 +2,16 @@
 """
 OCIO ACES Config Enricher
 
-Automatically upgrade and enrich OpenColorIO configs with ACES transform IDs
-and missing color spaces.
+Enrich OpenColorIO configs with ACES transform IDs and missing color spaces.
 
 Features:
-- Upgrades OCIO v2.4 to v2.5 format
 - Adds ACES transform IDs to color spaces
 - Enriches with equivalent/inverse transform IDs
 - Adds missing color spaces from repository
 - Filters by ACES version (1.x or 2.0)
+
+Note: Version upgrades (e.g. v2.4 → v2.5) are handled separately by
+upgrade_ocio_v24_to_v25.py and should be run before enrichment if needed.
 """
 
 import sys
@@ -87,47 +88,8 @@ def _load_config_permissive(config_path):
             os.unlink(tmp)
 
 
-def detect_ocio_version(config_path):
-    """Detect OCIO version from config file."""
-    import PyOpenColorIO as OCIO
-    config = _load_config_permissive(config_path)
-    major = config.getMajorVersion()
-    minor = config.getMinorVersion()
-    version = major + (minor / 10.0)
-    return version, config
-
-
-def upgrade_to_v25(input_config, output_config):
-    """Upgrade OCIO v2.4 config to v2.5 format."""
-    upgrade_script = SCRIPTS_DIR / "upgrade_ocio_v24_to_v25.py"
-
-    if not upgrade_script.exists():
-        raise FileNotFoundError(f"Upgrade script not found: {upgrade_script}")
-
-    print(f"\n{'='*80}")
-    print("UPGRADING CONFIG TO OCIO v2.5")
-    print(f"{'='*80}\n")
-
-    cmd = [
-        sys.executable,
-        str(upgrade_script),
-        str(input_config),
-        "-o", str(output_config)
-    ]
-
-    result = subprocess.run(cmd, capture_output=True, text=True)
-
-    if result.returncode != 0:
-        print("ERROR during upgrade:")
-        print(result.stderr)
-        return False
-
-    print(result.stdout)
-    return True
-
-
 def enrich_with_aces_ids(config_path, transforms_json, aces_versions, output_dir,
-                         report_only=False, prune=False):
+                         report_only=False, prune=False, reference_configs=None):
     """
     Enrich config with ACES transform IDs using the mapping script.
 
@@ -138,6 +100,7 @@ def enrich_with_aces_ids(config_path, transforms_json, aces_versions, output_dir
         output_dir: Directory for output files
         report_only: Pass --report-only to the mapping script
         prune: Pass --prune to the mapping script
+        reference_configs: Additional OCIO configs for builtin style cross-referencing
     """
     mapping_script = SCRIPTS_DIR / "ACES_json_to_OCIOmapping.py"
 
@@ -170,6 +133,9 @@ def enrich_with_aces_ids(config_path, transforms_json, aces_versions, output_dir
         cmd.append("--report-only")
     if prune:
         cmd.append("--prune")
+    if reference_configs:
+        cmd.append("--reference-configs")
+        cmd.extend(str(p) for p in reference_configs)
 
     result = subprocess.run(cmd, capture_output=True, text=True)
 
@@ -477,6 +443,10 @@ Examples:
   python3 enrich_ocio_config.py -i studio.ocio -o enriched.ocio \\
       --aces-version 2.0 --config-type studio
 
+  # Enrich a combined ACES 1.3 + 2.0 config (both version URNs)
+  python3 enrich_ocio_config.py -i combined.ocio -o enriched.ocio \\
+      --aces-version 1.3 2.0 --config-type studio
+
   # Use a local registry (offline / pinned copy)
   python3 enrich_ocio_config.py -i studio.ocio -o enriched.ocio \\
       --aces-version 2.0 --config-type studio --transforms transforms.json
@@ -502,9 +472,10 @@ Examples:
                              'If omitted, the output is named after the input '
                              'with a _enriched_YYYYMMDD_HHMMSS timestamp suffix. '
                              'Not required with --report-only.')
-    parser.add_argument('--aces-version', required=True,
-                        choices=['1.x', '1.3', '2.0', 'all'],
-                        help='Target ACES version (1.x, 1.3, 2.0, or all)')
+    parser.add_argument('--aces-version', required=True, nargs='+',
+                        metavar='VER',
+                        help='Target ACES version(s): 1.x, 1.3, 2.0, or all. '
+                             'Multiple values can be specified (e.g. --aces-version 1.3 2.0).')
     parser.add_argument('--config-type', choices=['studio', 'reference', 'cg'], default=None,
                         help='Config type: studio, reference, or cg. '
                              'CG configs receive ACES ID enrichment but no '
@@ -525,8 +496,6 @@ Examples:
         help='URL to download transforms.json when --transforms is not set '
              f'(default: {DEFAULT_TRANSFORMS_JSON_URL})',
     )
-    parser.add_argument('--skip-upgrade', action='store_true',
-                        help='Skip OCIO v2.4 to v2.5 upgrade (assume already v2.5)')
     parser.add_argument('--work-dir', type=Path,
                         help='Working directory for intermediate files (default: temp dir)')
     parser.add_argument('--report-only', action='store_true',
@@ -536,8 +505,24 @@ Examples:
     parser.add_argument('--prune', action='store_true',
                         help='Remove URNs whose primary ACES version is outside the '
                              'target --aces-version before enriching.')
+    parser.add_argument('--reference-configs', nargs='+', type=Path,
+                        metavar='CONFIG',
+                        help='Additional OCIO config(s) for BuiltinTransform style '
+                             'cross-referencing. URNs from items sharing the same '
+                             'builtin style across configs will be merged. Useful for '
+                             'combined configs where cross-version URNs were lost '
+                             'during merging (e.g. pass pure ACES 1.3 and 2.0 configs).')
 
     args = parser.parse_args()
+
+    # Normalise --aces-version: accept "all" as a shorthand for both generations.
+    valid_aces = {'1.x', '1.3', '2.0', 'all'}
+    for v in args.aces_version:
+        if v not in valid_aces:
+            parser.error(f"invalid --aces-version value: {v!r} "
+                         f"(choose from {', '.join(sorted(valid_aces))})")
+    if 'all' in args.aces_version:
+        args.aces_version = ['1.3', '2.0']
 
     # Validate inputs
     if not args.input.exists():
@@ -575,7 +560,8 @@ Examples:
     print(f"Input:        {args.input}")
     if not args.report_only:
         print(f"Output:       {args.output}")
-    print(f"ACES Version: {args.aces_version}")
+    aces_label = ' + '.join(args.aces_version)
+    print(f"ACES Version: {aces_label}")
     if args.config_type:
         print(f"Config Type:  {args.config_type}")
     print(f"Report Only:  {args.report_only}")
@@ -601,37 +587,28 @@ Examples:
             return 1
 
     try:
-        # Step 1: Detect OCIO version and upgrade if needed
         current_config = args.input
 
-        if not args.skip_upgrade and not args.report_only:
-            version, _ = detect_ocio_version(args.input)
-            print(f"Detected OCIO version: {version}")
+        # Step 1: Map ACES versions to JSON version strings
+        _V1_JSON = ['v1.0', 'v1.0.1', 'v1.0.3', 'v1.1',
+                     'v1.2', 'v1.3', 'v1.3.1', 'v1.5']
+        _V2_JSON = ['v2.0.0+2025.04.04']
 
-            if version < 2.5:
-                upgraded_config = work_dir / "upgraded_v2.5.ocio"
-                if not upgrade_to_v25(args.input, upgraded_config):
-                    print("Error: Upgrade failed")
-                    return 1
-                current_config = upgraded_config
-            else:
-                print("Config is already OCIO v2.5 or higher. Skipping upgrade.")
+        aces_json_versions: list[str] = []
+        aces_version_types: list[str] = []
+        for av in args.aces_version:
+            if av in ('1.x', '1.3'):
+                aces_json_versions.extend(v for v in _V1_JSON
+                                          if v not in aces_json_versions)
+                if 'aces_1.x' not in aces_version_types:
+                    aces_version_types.append('aces_1.x')
+            elif av == '2.0':
+                aces_json_versions.extend(v for v in _V2_JSON
+                                          if v not in aces_json_versions)
+                if 'aces_2.0' not in aces_version_types:
+                    aces_version_types.append('aces_2.0')
 
-        # Step 2: Map ACES versions to JSON version strings
-        if args.aces_version == 'all':
-            aces_json_versions = ['v1.0', 'v1.0.1', 'v1.0.3', 'v1.1',
-                                   'v1.2', 'v1.3', 'v1.3.1', 'v1.5',
-                                   'v2.0.0+2025.04.04']
-            aces_version_type = 'aces_all'
-        elif args.aces_version == '2.0':
-            aces_json_versions = ['v2.0.0+2025.04.04']
-            aces_version_type = 'aces_2.0'
-        elif args.aces_version in ['1.x', '1.3']:
-            aces_json_versions = ['v1.0', 'v1.0.1', 'v1.0.3', 'v1.1',
-                                   'v1.2', 'v1.3', 'v1.3.1', 'v1.5']
-            aces_version_type = 'aces_1.x'
-
-        # Step 3: Enrich (or audit) with ACES transform IDs
+        # Step 2: Enrich (or audit) with ACES transform IDs
         enrichment_dir = work_dir / "enriched"
         enrichment_dir.mkdir(exist_ok=True)
 
@@ -642,6 +619,7 @@ Examples:
             enrichment_dir,
             report_only=args.report_only,
             prune=args.prune,
+            reference_configs=args.reference_configs,
         )
 
         if args.report_only:
@@ -658,7 +636,7 @@ Examples:
             print("Error: Enrichment failed")
             return 1
 
-        # Step 4: Add missing color spaces from repository.
+        # Step 3: Add missing color spaces from repository.
         # CG configs intentionally have a reduced scope — they should not
         # receive additional color spaces beyond what the generator produced.
         if args.config_type == 'cg':
@@ -666,23 +644,24 @@ Examples:
                   "(CG scope is intentionally limited).")
             shutil.copy(enriched_config, args.output)
         else:
-            if not add_missing_colorspaces(
-                enriched_config,
-                aces_version_type,
-                args.config_type,
-                args.output
-            ):
-                print("Error: Failed to add missing color spaces")
-                return 1
+            current_src = enriched_config
+            for i, avt in enumerate(aces_version_types):
+                is_last = (i == len(aces_version_types) - 1)
+                dest = args.output if is_last else (work_dir / f"repo_{avt}.ocio")
+                if not add_missing_colorspaces(
+                    current_src, avt, args.config_type, dest
+                ):
+                    print(f"Error: Failed to add missing color spaces ({avt})")
+                    return 1
+                current_src = dest
 
         # Success!
         steps_done = []
-        steps_done.append("Upgraded to OCIO v2.5 (if needed)")
         if args.prune:
-            steps_done.append(f"Pruned non-ACES-{args.aces_version} URNs")
+            steps_done.append(f"Pruned non-ACES-{aces_label} URNs")
         steps_done.append("Enriched with ACES transform IDs")
         steps_done.append("Enhanced with equivalent/inverse transform IDs")
-        steps_done.append(f"Filtered for ACES {args.aces_version}")
+        steps_done.append(f"Filtered for ACES {aces_label}")
         if args.config_type != 'cg':
             steps_done.append("Added missing color spaces from repository")
 

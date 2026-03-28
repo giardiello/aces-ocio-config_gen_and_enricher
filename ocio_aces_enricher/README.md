@@ -4,11 +4,12 @@ Enriches OpenColorIO configs with ACES transform IDs and missing color spaces. W
 
 ## What It Does
 
-1. **Upgrades** OCIO v2.4 configs to v2.5 (migrates `ACEStransformID:` from `description` to `interchange.amf_transform_ids`)
-2. **Maps** OCIO color space names to ACES Transform IDs using the official [ACES Transform Registry](https://github.com/aces-aswf/aces/blob/main/transforms.json)
-3. **Enriches** each color space with equivalent and inverse transform ID cross-references
-4. **Adds missing color spaces** from a curated repository (camera IDTs, legacy displays, utility looks)
-5. **Prunes** (optional) URNs that don't belong to the target ACES version
+1. **Maps** OCIO color space names to ACES Transform IDs using the official [ACES Transform Registry](https://github.com/aces-aswf/aces/blob/main/transforms.json)
+2. **Enriches** each color space with equivalent and inverse transform ID cross-references
+3. **Adds missing color spaces** from a curated repository (camera IDTs, legacy displays, utility looks)
+4. **Prunes** (optional) URNs that don't belong to the target ACES version
+
+> **Note:** Version upgrades (e.g. v2.4 → v2.5) are handled separately by `upgrade_ocio_v24_to_v25.py` (`python -m ocio_aces_tools upgrade`). Run it before enrichment if your config needs upgrading.
 
 ## Usage
 
@@ -18,6 +19,10 @@ Via the unified CLI:
 # Enrich an ACES 2.0 studio config
 python -m ocio_aces_tools enrich -i studio.ocio -o enriched.ocio \
     --aces-version 2.0 --config-type studio
+
+# Enrich a combined ACES 1.3 + 2.0 config (both version URNs + equivalents)
+python -m ocio_aces_tools enrich -i combined.ocio -o enriched.ocio \
+    --aces-version 1.3 2.0 --config-type studio
 
 # Enrich an ACES 1.3 reference config
 python -m ocio_aces_tools enrich -i reference.ocio -o enriched.ocio \
@@ -49,13 +54,12 @@ python ocio_aces_enricher/scripts/enrich_ocio_config.py \
 |------|-------------|
 | `-i, --input` | Input OCIO config file |
 | `-o, --output` | Output enriched config (auto-named with timestamp if omitted) |
-| `--aces-version` | Target ACES version: `1.x`, `1.3`, `2.0`, or `all` |
+| `--aces-version` | Target ACES version(s): `1.x`, `1.3`, `2.0`, or `all`. Multiple values supported (e.g. `1.3 2.0`). |
 | `--config-type` | Config type: `studio`, `reference`, or `cg` |
 | `--transforms` | Path to local `transforms.json` (default: download from GitHub) |
 | `--transforms-url` | Override download URL |
 | `--prune` | Remove URNs from other ACES versions before enriching |
 | `--report-only` | Generate audit report without modifying the config |
-| `--skip-upgrade` | Skip the v2.4 → v2.5 upgrade step |
 | `--work-dir` | Directory for intermediate files (useful for debugging) |
 
 ## Additional Scripts

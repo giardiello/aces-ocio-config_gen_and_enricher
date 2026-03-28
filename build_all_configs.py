@@ -194,6 +194,13 @@ def collect_configs(
         dst = folder / f.name
         shutil.copy2(f, dst)
         copied.append(dst)
+
+        luts_src = f.parent / "luts"
+        if luts_src.is_dir():
+            luts_dst = folder / "luts"
+            if luts_dst.exists():
+                shutil.rmtree(luts_dst)
+            shutil.copytree(luts_src, luts_dst)
     return copied
 
 
@@ -347,6 +354,26 @@ def _load_config_permissive(path: Path):
             os.unlink(tmp)
 
 
+def _merge_description_urns(base_item, clf_item) -> int:
+    """Merge ACEStransformID URNs from *clf_item* onto *base_item*'s description.
+
+    Returns the number of new URNs added.
+    """
+    from ocio_aces_tools.ocio_utils import get_transform_ids
+
+    base_ids = set(get_transform_ids(base_item))
+    clf_ids = get_transform_ids(clf_item)
+    new_ids = [uid for uid in clf_ids if uid not in base_ids]
+    if not new_ids:
+        return 0
+
+    desc = base_item.getDescription() or ""
+    for uid in new_ids:
+        desc += f"\nACEStransformID: {uid}"
+    base_item.setDescription(desc)
+    return len(new_ids)
+
+
 def merge_aces20_into_base(
     base_path: Path,
     clf_path: Path,
@@ -356,8 +383,12 @@ def merge_aces20_into_base(
 
     Adds color spaces, named transforms, view transforms, shared views, and
     display-level shared view references from *clf_path* that are not already
-    present in *base_path*.  Also copies the CLF ``luts/`` directory alongside
-    the output and sets up ``search_path`` if needed.
+    present in *base_path*.  For items that already exist in the base, any
+    ACES 2.0 URNs from the CLF config are merged onto the base item's
+    description so that combined configs carry both v1.x and v2.0 IDs.
+
+    Also copies the CLF ``luts/`` directory alongside the output and sets up
+    ``search_path`` if needed.
 
     Returns True on success.
     """
@@ -384,6 +415,7 @@ def merge_aces20_into_base(
         base_nt_aliases.update(nt.getAliases())
 
     added_cs = added_nt = added_vt = added_sv = added_dv = 0
+    merged_urns = 0
 
     # --- Viewing rules (must come before shared views that reference them) ---
     base_vr = base_cfg.getViewingRules()
@@ -408,6 +440,12 @@ def merge_aces20_into_base(
             base_cfg.addColorSpace(cs)
             base_cs_aliases.update(cs.getAliases())
             added_cs += 1
+        else:
+            base_cs = base_cfg.getColorSpace(cs.getName())
+            n = _merge_description_urns(base_cs, cs)
+            if n:
+                base_cfg.addColorSpace(base_cs)
+                merged_urns += n
 
     # --- Named transforms ---
     for nt in clf_cfg.getNamedTransforms():
@@ -417,12 +455,24 @@ def merge_aces20_into_base(
             base_cfg.addNamedTransform(nt)
             base_nt_aliases.update(nt.getAliases())
             added_nt += 1
+        else:
+            base_nt = base_cfg.getNamedTransform(nt.getName())
+            n = _merge_description_urns(base_nt, nt)
+            if n:
+                base_cfg.addNamedTransform(base_nt)
+                merged_urns += n
 
     # --- View transforms ---
     for vt in clf_cfg.getViewTransforms():
         if vt.getName() not in base_vt_names:
             base_cfg.addViewTransform(vt)
             added_vt += 1
+        else:
+            base_vt = base_cfg.getViewTransform(vt.getName())
+            n = _merge_description_urns(base_vt, vt)
+            if n:
+                base_cfg.addViewTransform(base_vt)
+                merged_urns += n
 
     # --- Shared views ---
     for sv_name in clf_cfg.getSharedViews():
@@ -536,7 +586,7 @@ def merge_aces20_into_base(
     print(
         f"  MERGED: +{added_cs} cs, +{added_nt} named, "
         f"+{added_vt} view transforms, +{added_sv} shared views, "
-        f"+{added_dv} display views"
+        f"+{added_dv} display views, {merged_urns} URNs merged onto shared items"
     )
     return True
 
@@ -547,11 +597,11 @@ def merge_aces20_into_base(
 
 ENRICHER_SCRIPT = SCRIPT_DIR / "ocio_aces_enricher" / "scripts" / "enrich_ocio_config.py"
 
-# Pipeline ACES version → enricher --aces-version value.
-_ACES_TO_ENRICHER: dict[str, str] = {
-    "1.3":      "1.3",
-    "2.0":      "2.0",
-    "combined": "all",
+# Pipeline ACES version → enricher --aces-version value(s).
+_ACES_TO_ENRICHER: dict[str, list[str]] = {
+    "1.3":      ["1.3"],
+    "2.0":      ["2.0"],
+    "combined": ["1.3", "2.0"],
 }
 
 # Pipeline config type → enricher --config-type value.
@@ -594,6 +644,7 @@ def enrich_config(
     config_type: str,
     ocio_version: str,
     transforms_json: Path | None = None,
+    reference_configs: list[Path] | None = None,
 ) -> bool:
     """Run the enricher on a single config, overwriting it in place.
 
@@ -602,20 +653,25 @@ def enrich_config(
     removed.  Combined configs use ``--aces-version all`` without pruning so
     both 1.x and 2.0 IDs are kept.
 
+    *reference_configs* are additional OCIO configs passed to the enricher for
+    BuiltinTransform style cross-referencing.  For combined configs, pass the
+    pure ACES 1.3 and 2.0 configs so URNs from items sharing the same builtin
+    style can be merged even when transforms.json lacks equivalence links.
+
     Returns True on success.
     """
     if not ENRICHER_SCRIPT.exists():
         print(f"  WARNING: enricher not found at {ENRICHER_SCRIPT} — skipping.")
         return False
 
-    enricher_aces = _ACES_TO_ENRICHER.get(aces_version, aces_version)
+    enricher_aces = _ACES_TO_ENRICHER.get(aces_version, [aces_version])
     enricher_type = _TYPE_TO_ENRICHER.get(config_type, "studio")
 
     cmd = [
         sys.executable, str(ENRICHER_SCRIPT),
         "-i", str(config_path),
         "-o", str(config_path),
-        "--aces-version", enricher_aces,
+        "--aces-version", *enricher_aces,
         "--config-type", enricher_type,
     ]
 
@@ -623,13 +679,12 @@ def enrich_config(
     if aces_version in ("1.3", "2.0"):
         cmd.append("--prune")
 
-    # For OCIO 2.3 and 2.4 configs, skip the v2.5 upgrade step so the
-    # enricher adds IDs to description fields (not interchange attributes).
-    if ocio_version in ("2.3", "2.4"):
-        cmd.append("--skip-upgrade")
-
     if transforms_json is not None:
         cmd.extend(["--transforms", str(transforms_json)])
+
+    if reference_configs:
+        cmd.append("--reference-configs")
+        cmd.extend(str(p) for p in reference_configs)
 
     # Read the original declared version so we can restore it after enrichment.
     # The enricher may internally bump the version to load configs with
@@ -642,11 +697,15 @@ def enrich_config(
     result = subprocess.run(cmd, capture_output=True, text=True)
 
     if result.returncode != 0:
-        print(f"  ENRICH FAILED for {config_path.name}:")
+        print(f"  ENRICH FAILED for {config_path.name} (exit {result.returncode}):")
         stderr = result.stderr.strip()
+        stdout = result.stdout.strip()
         if stderr:
-            for line in stderr.splitlines()[-5:]:
-                print(f"    {line}")
+            for line in stderr.splitlines()[-10:]:
+                print(f"    ERR: {line}")
+        if stdout:
+            for line in stdout.splitlines()[-10:]:
+                print(f"    OUT: {line}")
         return False
 
     # Restore the original declared version if the enricher changed it.
@@ -670,6 +729,7 @@ def enrich_all(
     config_type: str,
     ocio_version: str,
     transforms_json: Path | None = None,
+    reference_configs: list[Path] | None = None,
 ) -> tuple[int, int]:
     """Enrich a list of configs.  Returns (success_count, failure_count)."""
     if not configs:
@@ -686,8 +746,10 @@ def enrich_all(
             a_ver, c_type = _infer_enricher_params(cfg)
 
         prune_tag = "+prune" if a_ver in ("1.3", "2.0") else ""
-        print(f"    enriching {cfg.name}  (ACES {a_ver}, {c_type}{prune_tag}) …", end="", flush=True)
-        if enrich_config(cfg, a_ver, c_type, ocio_version, transforms_json):
+        ref_tag = f"+{len(reference_configs)}ref" if reference_configs else ""
+        print(f"    enriching {cfg.name}  (ACES {a_ver}, {c_type}{prune_tag}{ref_tag}) …", end="", flush=True)
+        if enrich_config(cfg, a_ver, c_type, ocio_version, transforms_json,
+                         reference_configs=reference_configs):
             print("  OK")
             ok_count += 1
         else:
@@ -880,12 +942,34 @@ def build(
                     _header(
                         f"[ENRICH] OCIO {ocio_ver} / ACES {aces_ver} / {cfg_type}"
                     )
+
+                    # For combined configs, find the pure ACES 1.3 and 2.0
+                    # configs of the same OCIO version as reference so the
+                    # enricher can cross-reference URNs via BuiltinTransform
+                    # style matching.
+                    ref_configs: list[Path] | None = None
+                    if aces_ver == "combined":
+                        ref_configs = []
+                        ocio_dir = output / f"OCIO-v{ocio_ver}"
+                        for pure_aces in ("1.3", "2.0"):
+                            for p in all_configs:
+                                if (p.parent.parent == ocio_dir
+                                        and f"aces-v{pure_aces}" in p.stem
+                                        and "aces-v1.3-v2.0" not in p.stem
+                                        and p.suffix == ".ocio"):
+                                    ref_configs.append(p)
+                        if ref_configs:
+                            print(f"  Reference configs for builtin style cross-ref:")
+                            for rp in ref_configs:
+                                print(f"    {rp.name}")
+
                     ok_n, fail_n = enrich_all(
                         final_batch,
                         aces_version=aces_ver,
                         config_type=cfg_type,
                         ocio_version=ocio_ver,
                         transforms_json=transforms_json,
+                        reference_configs=ref_configs,
                     )
                     enrich_ok += ok_n
                     enrich_fail += fail_n
@@ -898,9 +982,122 @@ def build(
     if do_enrich:
         print(f"\n  Enrichment: {enrich_ok} succeeded, {enrich_fail} failed")
 
+    # ── Copy Look LUT files to combined configs ──────────────────────────
+    # Combined (ACES 1.3+2.0) configs inherit Looks from ACES 1.3 that
+    # reference external .spi1d / .spi3d files.  The enricher copies these
+    # into the pure 1.3 config's luts/ directory but not into the combined
+    # config's directory.  Copy any missing LUT files from the pure 1.3
+    # config that shares the same OCIO version and config kind.
+    _header("[LUTS] Ensure combined configs have Look LUT files")
+    for cfg_path in all_configs:
+        if "aces-v1.3-v2.0" not in cfg_path.stem:
+            continue
+        text = cfg_path.read_text(errors="replace")
+        referenced = {
+            os.path.basename(m.group(1))
+            for m in re.finditer(r'src:\s*([^\s,}]+)', text)
+            if '.' in m.group(1)
+        }
+        if not referenced:
+            continue
+        luts_dir = cfg_path.parent / "luts"
+        existing = set(f.name for f in luts_dir.iterdir()) if luts_dir.is_dir() else set()
+        missing = referenced - existing
+        if not missing:
+            continue
+        ocio_dir = cfg_path.parent.parent
+        donor = None
+        cfg_kind = _config_kind(cfg_path.stem)
+        for candidate in all_configs:
+            if (candidate.parent.parent == ocio_dir
+                    and "aces-v1.3" in candidate.stem
+                    and "aces-v1.3-v2.0" not in candidate.stem
+                    and _config_kind(candidate.stem) == cfg_kind):
+                donor_luts = candidate.parent / "luts"
+                if donor_luts.is_dir():
+                    donor = donor_luts
+                    break
+        if donor is None:
+            for candidate in all_configs:
+                if (candidate.parent.parent == ocio_dir
+                        and "aces-v1.3" in candidate.stem
+                        and "aces-v1.3-v2.0" not in candidate.stem):
+                    donor_luts = candidate.parent / "luts"
+                    if donor_luts.is_dir():
+                        donor = donor_luts
+                        break
+        if donor is None:
+            continue
+        luts_dir.mkdir(parents=True, exist_ok=True)
+        copied_count = 0
+        for lut_name in sorted(missing):
+            src = donor / lut_name
+            if src.is_file():
+                shutil.copy2(src, luts_dir / lut_name)
+                copied_count += 1
+        if copied_count:
+            print(f"  {cfg_path.name}: copied {copied_count} Look LUT(s) from {donor.parent.name}/")
+
     # ── Safety: remove stale loose artifacts at OCIO-vX/ level ─────────
     _header("[CLEANUP] Remove stale loose artifacts")
     _cleanup_loose_artifacts(all_configs)
+
+    # ── Fix bare interop_id values in v2.5 configs ───────────────────────
+    # The upstream generator sometimes strips the "ocio:" namespace from
+    # non-CIF interop IDs.  OCIO 2.5 requires either a recognised CIF
+    # standard ID (bare) or a namespaced ID ("namespace:value").
+    # Re-add the "ocio:" prefix only for IDs that are NOT CIF standard.
+    # Note: "srgbe_p3d65_display" is a known upstream bug (not a valid
+    # CIF ID, but the official built-in config also has it bare).
+    _OCIO_NAMESPACED_IDS = {
+        "acescc_ap1_scene", "acescct_ap1_scene", "adx10_apd_scene",
+        "adx16_apd_scene", "applelog_rec2020_scene", "arrilogc3_awg3_scene",
+        "arrilogc4_awg4_scene", "bmdfilm5_wg5_scene",
+        "canonlog2_cgamutd55_scene", "canonlog3_cgamutd55_scene",
+        "davinci_dwg_scene", "djilog_dgamut_scene", "g24_rec709_scene",
+        "itu709_rec709_scene", "lin_awg3_scene", "lin_awg4_scene",
+        "lin_bmdwg5_scene", "lin_cgamutd55_scene", "lin_ciexyzd65_display",
+        "lin_dgamut_scene", "lin_dwg_scene", "lin_rwg_scene",
+        "lin_sgamut3_scene", "lin_sgamut3cine_scene",
+        "lin_sgamut3cinevenice_scene", "lin_sgamut3venice_scene",
+        "lin_vgamut_scene", "redlog3g10_rwg_scene", "slog3_sgamut3_scene",
+        "slog3_sgamut3cine_scene", "slog3_sgamut3cinevenice_scene",
+        "slog3_sgamut3venice_scene", "vlog_vgamut_scene",
+    }
+    # IDs that are not CIF standard and have no valid namespace — the
+    # upstream generator emits them but they fail ociocheck.  Remove
+    # the interop_id line entirely (the alias is kept).
+    _INVALID_INTEROP_IDS = {"srgbe_p3d65_display"}
+
+    _invalid_interop_pat = re.compile(
+        r'\n[ \t]+interop_id: (?:' +
+        '|'.join(re.escape(i) for i in _INVALID_INTEROP_IDS) +
+        r')\s*\n',
+    )
+    v25_ocio_files = [c for c in all_configs if "/OCIO-v2.5/" in str(c)]
+    fixed_interop = 0
+    removed_interop = 0
+    for cfg_path in v25_ocio_files:
+        txt = cfg_path.read_text()
+        changed = False
+        for iid in _OCIO_NAMESPACED_IDS:
+            bare = f"interop_id: {iid}"
+            prefixed = f"interop_id: ocio:{iid}"
+            if bare in txt and prefixed not in txt:
+                txt = txt.replace(bare, prefixed)
+                changed = True
+                fixed_interop += 1
+        new_txt, n = _invalid_interop_pat.subn('\n', txt)
+        if n:
+            txt = new_txt
+            changed = True
+            removed_interop += n
+        if changed:
+            cfg_path.write_text(txt)
+    if fixed_interop or removed_interop:
+        print(f"  Fixed {fixed_interop} bare interop_id(s), removed "
+              f"{removed_interop} invalid interop_id(s) across "
+              f"{len(v25_ocio_files)} v2.5 config(s)")
 
     # ── OCIO v2.4 downgrade ──────────────────────────────────────────────
     # v2.4 configs are produced by downgrading the fully-generated v2.5

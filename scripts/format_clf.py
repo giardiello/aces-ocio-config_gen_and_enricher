@@ -23,6 +23,56 @@ def _detect_clf_namespace(path: Path) -> str | None:
     return m.group(1) if m else None
 
 
+def _fix_clf_formatting(path: Path) -> None:
+    """Fix XML declaration, Array indentation, and Range value whitespace."""
+    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+
+    out = []
+    inside_array = False
+    array_indent = ""
+
+    for line in lines:
+        stripped = line.strip()
+
+        if stripped.startswith("<Array "):
+            inside_array = True
+            array_indent = line[: len(line) - len(line.lstrip())] + "    "
+            out.append(line)
+            continue
+
+        if stripped == "</Array>":
+            inside_array = False
+            out.append(line)
+            continue
+
+        if inside_array and stripped and not stripped.startswith("<"):
+            out.append(array_indent + stripped + "\n")
+            continue
+
+        range_match = re.match(
+            r"^(\s*)<(min|max)(In|Out)Value>\s*(.+?)\s*</(min|max)(In|Out)Value>",
+            line,
+        )
+        if range_match:
+            indent = range_match.group(1)
+            tag = f"{range_match.group(2)}{range_match.group(3)}Value"
+            val = range_match.group(4)
+            out.append(f"{indent}<{tag}>{val}</{tag}>\n")
+            continue
+
+        out.append(line)
+
+    content = "".join(out)
+
+    if content.startswith("<?xml"):
+        end = content.index("?>") + 2
+        content = '<?xml version="1.0" encoding="UTF-8"?>' + content[end:]
+    else:
+        content = '<?xml version="1.0" encoding="UTF-8"?>\n' + content
+
+    path.write_text(content, encoding="utf-8")
+
+
 def format_clf(path: Path) -> bool:
     """Reformat a single CLF file in-place. Returns True on success."""
     try:
@@ -30,7 +80,7 @@ def format_clf(path: Path) -> bool:
 
         tree = ET.parse(path)
         ET.indent(tree, space="    ")
-        tree.write(path, xml_declaration=True, encoding="UTF-8")
+        tree.write(path, xml_declaration=False, encoding="UTF-8")
 
         text = path.read_text(encoding="utf-8")
         needs_write = False
@@ -46,6 +96,8 @@ def format_clf(path: Path) -> bool:
 
         if needs_write:
             path.write_text(text, encoding="utf-8")
+
+        _fix_clf_formatting(path)
 
         return True
     except ET.ParseError as e:

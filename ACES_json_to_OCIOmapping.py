@@ -20,7 +20,11 @@ from ocio_aces_tools.display_view import (
     get_transform_type_from_urn,
     parse_display_view_structure,
 )
-from ocio_aces_tools.ocio_utils import get_transform_ids
+from ocio_aces_tools.ocio_utils import (
+    get_transform_ids,
+    get_builtin_styles,
+    build_builtin_style_urn_map,
+)
 
 
 # ============================================================================
@@ -504,7 +508,7 @@ def parse_ocio_config(config):
 
     return ocio_to_ids_map, id_to_ocio_map, ocio_version
 
-def process_files(transforms_json_path, ocio_path, output_folder, versions_to_process=None, types_to_process=None, validate_display_view=False, report_only=False, prune=False):
+def process_files(transforms_json_path, ocio_path, output_folder, versions_to_process=None, types_to_process=None, validate_display_view=False, report_only=False, prune=False, reference_configs=None):
     """
     Main processing function to correlate ACES transforms with OCIO names and
     generate the specified output files.
@@ -682,11 +686,18 @@ def process_files(transforms_json_path, ocio_path, output_folder, versions_to_pr
         print("\nWarning: --prune requires version filtering (-v). Skipping prune step.")
 
     # 5. Pre-calculate which 'missing' IDs will be added to descriptions
-    #    When version filtering is active, skip previousEquivalentTransformIds
-    #    entirely — they are by definition legacy IDs from older ACES versions
-    #    and should not be injected into a version-targeted config.
-    #    Inverse IDs are still added (they reference the current version).
-    skip_equivalents = bool(versions_to_process)
+    #    When targeting a single ACES generation (only 1.x OR only 2.x),
+    #    skip previousEquivalentTransformIds — they are legacy IDs from the
+    #    other generation and should not be injected.
+    #    When targeting ALL versions (both 1.x and 2.x), equivalents are
+    #    included so combined configs get the full set of URNs.
+    #    Inverse IDs are always added (they reference the current version).
+    if versions_to_process:
+        has_v1 = any(v.startswith('v1') for v in versions_to_process)
+        has_v2 = any(v.startswith('v2') for v in versions_to_process)
+        skip_equivalents = not (has_v1 and has_v2)
+    else:
+        skip_equivalents = False
 
     added_as_related_map = {}
     for ocio_name, id_list in ocio_to_ids.items():
@@ -738,6 +749,30 @@ def process_files(transforms_json_path, ocio_path, output_folder, versions_to_pr
     # 7. Update the OCIO config object in memory with related IDs
     print("Updating OCIO configuration in memory with related transform IDs...")
 
+    # Build a BuiltinTransform-style → URN map so items sharing the same
+    # OCIO builtin (e.g. ARRI_LOGC3_EI800_to_ACES2065-1) can inherit
+    # each other's URNs even when transforms.json lacks equivalence links.
+    # Include reference configs (e.g. pure ACES 1.3 and 2.0) to capture
+    # cross-version URNs that were lost during config merging.
+    builtin_style_urn_map = build_builtin_style_urn_map(config)
+    if reference_configs:
+        print(f"  Loading {len(reference_configs)} reference config(s) for builtin style cross-referencing...")
+        for ref_path in reference_configs:
+            try:
+                ref_config = OCIO.Config.CreateFromFile(ref_path)
+                ref_map = build_builtin_style_urn_map(ref_config)
+                for style, urns in ref_map.items():
+                    if style not in builtin_style_urn_map:
+                        builtin_style_urn_map[style] = set()
+                    builtin_style_urn_map[style].update(urns)
+                print(f"    + {os.path.basename(ref_path)}: {len(ref_map)} styles")
+            except Exception as e:
+                print(f"    Warning: Could not load reference config {ref_path}: {e}")
+    if builtin_style_urn_map:
+        n_styles = len(builtin_style_urn_map)
+        n_urns = sum(len(v) for v in builtin_style_urn_map.values())
+        print(f"  Built BuiltinTransform style → URN map: {n_styles} styles, {n_urns} total URNs")
+
     def update_item_with_related_ids(ocio_item):
         """
         Update OCIO item with related transform IDs.
@@ -748,37 +783,116 @@ def process_files(transforms_json_path, ocio_path, output_folder, versions_to_pr
         found_ids = get_transform_ids(ocio_item)
         original_description = ocio_item.getDescription() or ""
 
-        # Collect equivalent and inverse IDs.
-        # When version filtering is active, skip equivalent IDs (they are
-        # legacy URNs from older ACES versions).
-        all_equivalents = set()
-        all_inverses = set()
-
-        for an_id in found_ids:
-            transform_obj = aces_id_map.get(an_id)
-            if transform_obj:
-                if not skip_equivalents:
-                    for eq_id in transform_obj.get('previousEquivalentTransformIds', []):
-                        all_equivalents.add(eq_id)
-
-                inv_id = transform_obj.get('inverseTransformId')
-                if inv_id:
-                    all_inverses.add(inv_id)
-
-        # Filter out IDs that are already present
-        all_existing_content = original_description or ""
+        # Build the set of IDs already present on this item so we can
+        # deduplicate correctly (set-based, not substring-based).
+        existing_id_set = set(found_ids)
         try:
             if hasattr(ocio_item, 'getInterchangeAttributes'):
                 attrs = ocio_item.getInterchangeAttributes()
                 if attrs and 'amf_transform_ids' in attrs:
-                    amf_ids = attrs['amf_transform_ids']
-                    if amf_ids:
-                        all_existing_content += amf_ids
+                    amf_ids = attrs['amf_transform_ids'] or ""
+                    for line in amf_ids.split('\n'):
+                        stripped = line.strip()
+                        if stripped:
+                            existing_id_set.add(stripped)
         except (AttributeError, Exception):
             pass
+        desc = original_description or ""
+        for line in desc.split('\n'):
+            stripped = line.strip()
+            if stripped.startswith('ACEStransformID:'):
+                existing_id_set.add(stripped.split(':', 1)[1].strip())
 
-        new_equivalents = [eq for eq in sorted(list(all_equivalents)) if eq not in all_existing_content]
-        new_inverses = [inv for inv in sorted(list(all_inverses)) if inv not in all_existing_content]
+        # Resolve the transitive closure of equivalents and inverses.
+        # A single pass may miss IDs whose equivalents were themselves just
+        # discovered (e.g. adding InvODT.X.a1.0.3 as an inverse, then
+        # needing its equivalents a1.0.0 and a1.0.1).
+        all_equivalents: set[str] = set()
+        all_inverses: set[str] = set()
+        visited: set[str] = set()
+        frontier = list(found_ids)
+
+        while frontier:
+            an_id = frontier.pop()
+            if an_id in visited:
+                continue
+            visited.add(an_id)
+
+            transform_obj = aces_id_map.get(an_id)
+            if not transform_obj:
+                continue
+
+            if not skip_equivalents:
+                # Add the primary ID of the resolved transform.  This
+                # handles the reverse-direction case: if a v1.x equivalent
+                # maps to a v2.0 transform, the v2.0 primary ID is added.
+                primary_id = transform_obj.get('transformId')
+                if primary_id:
+                    all_equivalents.add(primary_id)
+                    if primary_id not in visited:
+                        frontier.append(primary_id)
+
+                for eq_id in transform_obj.get('previousEquivalentTransformIds', []):
+                    all_equivalents.add(eq_id)
+                    if eq_id not in visited:
+                        frontier.append(eq_id)
+
+            inv_id = transform_obj.get('inverseTransformId')
+            if inv_id:
+                all_inverses.add(inv_id)
+                if inv_id not in visited:
+                    frontier.append(inv_id)
+
+        # BuiltinTransform style correlation: if this item uses a builtin
+        # style that other items also use, pull in their URNs as equivalents.
+        # This catches cases like ARRI LogC3 where transforms.json has no
+        # previousEquivalentTransformIds linking v1.5 and v2.0 URNs.
+        if not skip_equivalents and builtin_style_urn_map:
+            item_styles = get_builtin_styles(ocio_item)
+            for style in item_styles:
+                style_urns = builtin_style_urn_map.get(style, set())
+                for urn in style_urns:
+                    if urn not in existing_id_set and urn not in all_equivalents:
+                        all_equivalents.add(urn)
+                        if urn not in visited:
+                            frontier.append(urn)
+            # Drain any newly added frontier items through the same
+            # transitive closure logic.
+            while frontier:
+                an_id = frontier.pop()
+                if an_id in visited:
+                    continue
+                visited.add(an_id)
+                transform_obj = aces_id_map.get(an_id)
+                if not transform_obj:
+                    continue
+                primary_id = transform_obj.get('transformId')
+                if primary_id:
+                    all_equivalents.add(primary_id)
+                    if primary_id not in visited:
+                        frontier.append(primary_id)
+                for eq_id in transform_obj.get('previousEquivalentTransformIds', []):
+                    all_equivalents.add(eq_id)
+                    if eq_id not in visited:
+                        frontier.append(eq_id)
+                inv_id = transform_obj.get('inverseTransformId')
+                if inv_id:
+                    all_inverses.add(inv_id)
+                    if inv_id not in visited:
+                        frontier.append(inv_id)
+
+        new_equivalents = [eq for eq in sorted(all_equivalents) if eq not in existing_id_set]
+        new_inverses = [inv for inv in sorted(all_inverses) if inv not in existing_id_set]
+
+        if new_equivalents or new_inverses:
+            name = ocio_item.getName()
+            n_added = len(new_equivalents) + len(new_inverses)
+            builtin_note = ""
+            if not skip_equivalents and builtin_style_urn_map:
+                item_styles = get_builtin_styles(ocio_item)
+                if item_styles:
+                    builtin_note = f" (via builtin style: {item_styles[0]})"
+            print(f"  + {name}: adding {n_added} URN(s){builtin_note}")
 
         # Update based on OCIO version
         if ocio_version >= 2.5:
@@ -904,6 +1018,11 @@ def main():
     parser.add_argument("--prune", action="store_true",
                         help="Remove URNs whose primary ACES version is outside the target\n"
                              "versions specified with -v. Requires -v.")
+    parser.add_argument("--reference-configs", nargs='+', metavar='CONFIG',
+                        help="Additional OCIO config(s) to use for BuiltinTransform style\n"
+                             "cross-referencing. URNs from items sharing the same builtin\n"
+                             "style across configs will be merged. Useful for combined\n"
+                             "configs where cross-version URNs were lost during merging.")
 
     args = parser.parse_args()
 
@@ -919,6 +1038,7 @@ def main():
         args.validate_display_view,
         report_only=args.report_only,
         prune=args.prune,
+        reference_configs=args.reference_configs,
     )
 
 if __name__ == "__main__":

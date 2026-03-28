@@ -50,13 +50,17 @@ DISPLAY_VIEWS: list[tuple[str, str, str]] = [
     ("PQ4000_P3", "Rec.2100-PQ - Display", "ACES 2.0 - HDR 4000 nits (P3 D65)"),
 ]
 
+_CLF_NAME = "studio-config-all-views-v4.0.0_aces-v2.0_ocio-v2.3-clf.ocio"
+
 CONFIGS: list[tuple[str, str]] = [
     ("builtin inv (OCIO 2.5)", BUILTIN_FWD),
-    ("inverse: ACEScc (no HL)", "OUTPUT/clf_v2_no_hl/studio-config-v3.0.0_aces-v2.0_ocio-v2.3-clf.ocio"),
-    ("inverse: ACEScc (clf_v2)", "OUTPUT/clf_v2/studio-config-v3.0.0_aces-v2.0_ocio-v2.3-clf.ocio"),
-    ("inverse: extended-log", "OUTPUT/extended_log_test/studio-config-v3.0.0_aces-v2.0_ocio-v2.3-clf.ocio"),
-    ("inverse: camera-log", "OUTPUT/camera_log_test/studio-config-v3.0.0_aces-v2.0_ocio-v2.3-clf.ocio"),
-    ("inverse: jplog2", "OUTPUT/jplog2_test/studio-config-v3.0.0_aces-v2.0_ocio-v2.3-clf.ocio"),
+    ("display-shaper (default)", f"OUTPUT/benchmark_display_shaper/{_CLF_NAME}"),
+    ("acescct-domain",          f"OUTPUT/benchmark_acescct_domain/{_CLF_NAME}"),
+    ("acescct",                 f"OUTPUT/benchmark_acescct/{_CLF_NAME}"),
+    ("acescc",                  f"OUTPUT/benchmark_acescc/{_CLF_NAME}"),
+    ("extended-log",            f"OUTPUT/benchmark_extended_log/{_CLF_NAME}"),
+    ("camera-log",              f"OUTPUT/benchmark_camera_log/{_CLF_NAME}"),
+    ("jplog2",                  f"OUTPUT/benchmark_jplog2/{_CLF_NAME}"),
 ]
 
 CHUNK = 65536
@@ -133,6 +137,8 @@ def run_one(
 
 
 def main() -> int:
+    import csv as _csv
+
     base = os.path.dirname(os.path.abspath(__file__))
     ap = argparse.ArgumentParser()
     ap.add_argument("--cms", default=os.path.join(base, "test_assets", "CMS_32.exr"))
@@ -147,6 +153,7 @@ def main() -> int:
         default="all",
         help="Comma-separated short names from DISPLAY_VIEWS, or 'all'",
     )
+    ap.add_argument("--csv", default=None, help="Save results to CSV file")
     args = ap.parse_args()
 
     cms = load_cms(args.cms)
@@ -168,6 +175,7 @@ def main() -> int:
     print(f"CMS samples: {len(cms)} (ACEScct)")
     print(f"Mode: {mode}\n")
 
+    csv_rows: list[list[str]] = []
     fwd_path = BUILTIN_FWD
     for tname, display, view in targets:
         print("=" * 72)
@@ -186,10 +194,23 @@ def main() -> int:
                 f"med={r['median_cv']:6.2f}  p95={r['p95_cv']:6.2f}  "
                 f"p99={r['p99_cv']:6.2f}  max={r['max_cv']:7.2f}"
             )
+            csv_rows.append([
+                label, tname,
+                f"{r['mean_cv']:.3f}", f"{r['median_cv']:.3f}",
+                f"{r['p95_cv']:.3f}", f"{r['p99_cv']:.3f}", f"{r['max_cv']:.3f}",
+            ])
         if rows:
             best = min(rows, key=lambda x: x[1]["mean_cv"])
             print(f"  -> best mean CV: {best[0]} ({best[1]['mean_cv']:.3f})")
         print()
+
+    if args.csv:
+        os.makedirs(os.path.dirname(args.csv) or ".", exist_ok=True)
+        with open(args.csv, "w", newline="") as f:
+            w = _csv.writer(f)
+            w.writerow(["Config", "Target", "Mean CV", "Median CV", "P95 CV", "P99 CV", "Max CV"])
+            w.writerows(csv_rows)
+        print(f"Results saved to {args.csv}")
 
     return 0
 

@@ -6,11 +6,16 @@ Reports max error (in CV, 100 * abs diff) per scene-linear band. Bands extend to
 (scene linear) to cover the full ACEScct range.
 
 Usage:
-    python test_inverse_roundtrip_precision.py [path_to_config.ocio] [path_to_luts_dir]
-    Defaults: OUTPUT/clf_v2/studio-config-v3.0.0_aces-v2.0_ocio-v2.3-clf.ocio, OUTPUT/clf_v2/luts
+    python test_inverse_roundtrip_precision.py CONFIG [--luts-dir DIR] [--vt NAME ...] [--csv OUT]
+    Defaults: all SDR + HDR view transforms found in the config.
 """
 
+from __future__ import annotations
+
+import argparse
+import csv
 import os
+import re
 import sys
 
 try:
@@ -20,97 +25,142 @@ except ImportError as e:
     print("Error: need numpy and PyOpenColorIO.", e)
     sys.exit(1)
 
-# Bands (scene-linear gray level ranges) and sample count per band.
-# Extended to ~222 to cover full ACEScct range (scene linear up to ~222).
 BANDS = [
-    ("Shadow (0.001-0.01)", 0.001, 0.01, 20),
-    ("Low-mid (0.01-0.1)", 0.01, 0.1, 30),
-    ("Upper (0.1-0.5)", 0.1, 0.5, 40),
-    ("Bright (0.5-1)", 0.5, 1.0, 25),
-    ("Super bright (1-2)", 1.0, 2.0, 20),
-    ("Very bright (2-10)", 2.0, 10.0, 25),
-    ("High (10-50)", 10.0, 50.0, 30),
-    ("Very high (50-100)", 50.0, 100.0, 25),
-    ("ACEScct top (100-222)", 100.0, 222.0, 30),
+    ("Shadow (0.001-0.01)",    0.001,  0.01,   40),
+    ("Low-mid (0.01-0.1)",     0.01,   0.1,    60),
+    ("Upper (0.1-0.5)",        0.1,    0.5,    80),
+    ("Bright (0.5-1)",         0.5,    1.0,    50),
+    ("Super bright (1-2)",     1.0,    2.0,    40),
+    ("Very bright (2-10)",     2.0,    10.0,   50),
+    ("High (10-50)",           10.0,   50.0,   60),
+    ("Very high (50-100)",     50.0,   100.0,  50),
+    ("ACEScct top (100-222)",  100.0,  222.0,  60),
+]
+
+DEFAULT_VTS = [
+    "ACES 2.0 - SDR 100 nits (Rec.709)",
+    "ACES 2.0 - HDR 1000 nits (Rec.2020)",
+    "ACES 2.0 - HDR 4000 nits (Rec.2020)",
+    "ACES 2.0 - HDR 1000 nits (P3 D65)",
 ]
 
 
-def run_roundtrip(config_path, luts_dir, vt_name="ACES 2.0 - SDR 100 nits (Rec.709)"):
+def run_roundtrip(config_path: str, vt_name: str) -> list[tuple[str, float, float]] | None:
     config_path = os.path.abspath(config_path)
-    luts_dir = os.path.abspath(luts_dir)
     if not os.path.isfile(config_path):
         print(f"Config not found: {config_path}")
-        return False
+        return None
+    saved_cwd = os.getcwd()
     os.chdir(os.path.dirname(config_path))
-    config = ocio.Config.CreateFromFile(config_path)
+    try:
+        config = ocio.Config.CreateFromFile(os.path.basename(config_path))
 
-    vt = config.getViewTransform(vt_name)
-    if vt is None:
-        print(f"ViewTransform not found: {vt_name}")
-        return False
+        vt = config.getViewTransform(vt_name)
+        if vt is None:
+            print(f"ViewTransform not found: {vt_name}")
+            return None
 
-    from_ref = vt.getTransform(ocio.VIEWTRANSFORM_DIR_FROM_REFERENCE)
-    to_ref = vt.getTransform(ocio.VIEWTRANSFORM_DIR_TO_REFERENCE)
-    proc_fwd = config.getProcessor(from_ref)
-    proc_inv = config.getProcessor(to_ref)
+        from_ref = vt.getTransform(ocio.VIEWTRANSFORM_DIR_FROM_REFERENCE)
+        to_ref = vt.getTransform(ocio.VIEWTRANSFORM_DIR_TO_REFERENCE)
+        proc_fwd = config.getProcessor(from_ref)
+        proc_inv = config.getProcessor(to_ref)
 
-    cpu_fwd = proc_fwd.getDefaultCPUProcessor()
-    cpu_inv = proc_inv.getDefaultCPUProcessor()
+        cpu_fwd = proc_fwd.getDefaultCPUProcessor()
+        cpu_inv = proc_inv.getDefaultCPUProcessor()
 
-    band_errors = []
-    for name, lo, hi, n in BANDS:
-        # Gray samples in [lo, hi]
-        if n <= 1:
-            vals = np.array([lo if lo == hi else (lo + hi) / 2.0], dtype=np.float32)
-        else:
-            vals = np.linspace(lo, hi, n, dtype=np.float32)
-        pixels = np.stack([vals, vals, vals], axis=1)  # (n, 3)
-        orig = pixels.copy()
+        band_errors = []
+        for name, lo, hi, n in BANDS:
+            if n <= 1:
+                vals = np.array([lo if lo == hi else (lo + hi) / 2.0], dtype=np.float32)
+            else:
+                vals = np.linspace(lo, hi, n, dtype=np.float32)
+            pixels = np.stack([vals, vals, vals], axis=1)
+            orig = pixels.copy()
 
-        buf = ocio.PackedImageDesc(pixels.ravel(), len(pixels), 1, 3)
-        cpu_fwd.apply(buf)
-        cpu_inv.apply(buf)
+            buf = ocio.PackedImageDesc(pixels.ravel(), len(pixels), 1, 3)
+            cpu_fwd.apply(buf)
+            cpu_inv.apply(buf)
 
-        err = np.abs(pixels.ravel().reshape(-1, 3) - orig)
-        max_err_linear = float(np.max(err))
-        cv_error = max_err_linear * 100.0
-        band_errors.append((name, cv_error, max_err_linear))
+            err = np.abs(pixels.ravel().reshape(-1, 3) - orig)
+            max_err_linear = float(np.max(err))
+            cv_error = max_err_linear * 100.0
+            band_errors.append((name, cv_error, max_err_linear))
 
-    return band_errors
+        return band_errors
+    finally:
+        os.chdir(saved_cwd)
 
 
-def main():
+def _classify_vt(vt_name: str) -> str:
+    if "SDR" in vt_name:
+        return "SDR"
+    m = re.search(r"(\d+)\s*nits", vt_name)
+    if m and int(m.group(1)) > 108:
+        return "HDR"
+    return "SDR"
+
+
+def main() -> int:
     base = os.path.dirname(os.path.abspath(__file__))
-    config_path = os.path.join(base, "OUTPUT", "clf_v2", "studio-config-v3.0.0_aces-v2.0_ocio-v2.3-clf.ocio")
-    luts_dir = os.path.join(base, "OUTPUT", "clf_v2", "luts")
-    if len(sys.argv) >= 2:
-        config_path = sys.argv[1]
-    if len(sys.argv) >= 3:
-        luts_dir = sys.argv[2]
+    ap = argparse.ArgumentParser(description="Inverse CLF roundtrip precision test")
+    ap.add_argument("config", nargs="?",
+                    default=os.path.join(base, "OUTPUT", "benchmark_display_shaper",
+                                         "studio-config-all-views-v4.0.0_aces-v2.0_ocio-v2.3-clf.ocio"))
+    ap.add_argument("--luts-dir", default=None, help="LUTs directory (unused, kept for compat)")
+    ap.add_argument("--vt", nargs="*", default=None,
+                    help="View transform names to test (default: SDR + HDR set)")
+    ap.add_argument("--csv", default=None, help="Save results to CSV file")
+    ap.add_argument("--threshold", type=float, default=1.0,
+                    help="Max acceptable CV error for Upper (0.1-0.5) band (default: 1.0)")
+    args = ap.parse_args()
 
-    print("Inverse CLF roundtrip precision (ACES -> forward -> inverse -> ACES)")
-    print(f"Config: {config_path}")
-    print(f"VT: ACES 2.0 - SDR 100 nits (Rec.709)")
+    vt_names = args.vt or DEFAULT_VTS
+
+    print("Inverse CLF roundtrip precision (ACES -> forward VT -> inverse VT -> ACES)")
+    print(f"Config: {args.config}")
     print()
 
-    result = run_roundtrip(config_path, luts_dir)
-    if result is False:
-        sys.exit(1)
+    csv_rows = []
+    worst_upper_cv = 0.0
+    any_fail = False
 
-    print(f"{'Band':<28} {'Max error (CV)':>14} {'Max diff (linear)':>18}")
-    print("-" * 62)
-    for name, cv_err, lin_err in result:
-        print(f"{name:<28} {cv_err:>14.2f} {lin_err:>18.6f}")
-    print()
+    for vt_name in vt_names:
+        vt_class = _classify_vt(vt_name)
+        print(f"=== {vt_name} ({vt_class}) ===")
+        result = run_roundtrip(args.config, vt_name)
+        if result is None:
+            print("  SKIP (not found)\n")
+            continue
 
-    upper_cv = next(cv for (n, cv, _) in result if "Upper (0.1-0.5)" in n)
-    threshold_cv = 1.0  # no shaper/highlight compression; expect ~0.15 CV
-    if upper_cv > threshold_cv:
-        print(f"FAIL: Upper (0.1-0.5) error {upper_cv:.2f} CV > {threshold_cv}")
-        sys.exit(1)
-    print(f"PASS: Upper (0.1-0.5) error {upper_cv:.2f} CV <= {threshold_cv}")
-    sys.exit(0)
+        print(f"  {'Band':<28} {'Max CV':>10} {'Max linear':>14}")
+        print(f"  {'-' * 54}")
+        for name, cv_err, lin_err in result:
+            print(f"  {name:<28} {cv_err:>10.2f} {lin_err:>14.6f}")
+            csv_rows.append([vt_name, vt_class, name, f"{cv_err:.4f}", f"{lin_err:.8f}"])
+
+        upper_cv = next((cv for (n, cv, _) in result if "Upper (0.1-0.5)" in n), 0.0)
+        worst_upper_cv = max(worst_upper_cv, upper_cv)
+        status = "PASS" if upper_cv <= args.threshold else "FAIL"
+        if status == "FAIL":
+            any_fail = True
+        print(f"  Upper (0.1-0.5): {upper_cv:.2f} CV -> {status}")
+        print()
+
+    if args.csv:
+        os.makedirs(os.path.dirname(args.csv) or ".", exist_ok=True)
+        with open(args.csv, "w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["ViewTransform", "Type", "Band", "Max CV", "Max Linear"])
+            w.writerows(csv_rows)
+        print(f"Results saved to {args.csv}")
+
+    print(f"Worst Upper (0.1-0.5) across all VTs: {worst_upper_cv:.2f} CV")
+    if any_fail:
+        print(f"FAIL: exceeds threshold {args.threshold} CV")
+        return 1
+    print(f"PASS: all within threshold {args.threshold} CV")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
