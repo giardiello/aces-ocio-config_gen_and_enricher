@@ -1743,9 +1743,10 @@ def probe_display_shaper_range(config, vt_name, grid_res=65, margin=0.01):
     raw_min = float(grid.min())
     raw_max = float(grid.max())
     span = raw_max - raw_min
-    domain_min = max(0.0, raw_min - span * margin)
-    domain_max = min(1.0, raw_max + span * margin)
-    if domain_min <= 1e-6 and domain_max >= 1.0 - 1e-6:
+    domain_min = raw_min - span * margin
+    domain_max = raw_max + span * margin
+    tol = 0.02
+    if domain_min >= -tol and domain_max <= 1.0 + tol:
         return None, None
     return domain_min, domain_max
 
